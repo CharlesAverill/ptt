@@ -1,0 +1,4 @@
+(test
+ (name test_stlc)
+ (libraries ptt unix)
+ (deps sample1.stlc sample2.stlc))

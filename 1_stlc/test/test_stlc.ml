@@ -1,7 +1,8 @@
-(** Tests for the untyped lambda calculus interpreter. *)
+(** Tests for the simply-typed lambda calculus interpreter. *)
 
 open Ptt.Syntax
 open Ptt.Eval
+open Ptt.Typechecker
 open Ptt.Driver
 
 let failures : string list ref = ref []
@@ -12,7 +13,12 @@ let check (name : string) (expected : 'a) (actual : 'a) : unit =
     failures := name :: !failures)
 
 let parse_fails (s : string) : bool =
-  match parse s with _ -> false | exception Ptt.Lexer.ParseError _ -> true
+  match parse_sterm s with
+  | _ -> false
+  | exception Ptt.Lexer.ParseError _ -> true
+
+let typecheck_fails (s : string) : bool =
+  match parse s with _ -> false | exception TypeError _ -> true
 
 (** Strip ANSI escape sequences (["\x1b[...m"]) from a string *)
 let strip_ansi (s : string) : string =
@@ -132,47 +138,87 @@ let () =
     (App (Lam ("x", Var "x"), Var "z"))
     (eval (App (Lam ("x", Var "x"), Var "z")))
 
-(* parse *)
+(* parse (structural, pre-typecheck) *)
 
 let () =
-  check "parse: var" (Var "x") (parse "x");
-  check "parse: lam" (Lam ("x", Var "x")) (parse "\\x. x");
-  check "parse: app" (App (Var "x", Var "y")) (parse "x y");
+  check "parse: var" (SVar "x") (parse_sterm "x");
+  check "parse: lam"
+    (SLam ("x", Some TUnit, SVar "x"))
+    (parse_sterm "\\x:unit. x");
+  check "parse: app" (SApp (SVar "x", SVar "y")) (parse_sterm "x y");
   check "parse: app left-assoc"
-    (App (App (Var "x", Var "y"), Var "z"))
-    (parse "x y z");
+    (SApp (SApp (SVar "x", SVar "y"), SVar "z"))
+    (parse_sterm "x y z");
   check "parse: parens"
-    (App (Var "x", App (Var "y", Var "z")))
-    (parse "x (y z)");
+    (SApp (SVar "x", SApp (SVar "y", SVar "z")))
+    (parse_sterm "x (y z)");
   check "parse: lam body extends right"
-    (Lam ("x", App (Var "x", Var "y")))
-    (parse "\\x. x y");
+    (SLam ("x", Some TUnit, SApp (SVar "x", SVar "y")))
+    (parse_sterm "\\x:unit. x y");
+  check "parse: unit" SUnit (parse_sterm "()");
   check "parse: unmatched paren" true (parse_fails ")");
   check "parse: empty" true (parse_fails "");
   check "parse: comment skipped"
-    (App (Var "x", Var "y"))
-    (parse "x (* a comment *) y");
-  check "parse: nested comment skipped" (Var "x")
-    (parse "(* outer (* inner *) outer *) x");
+    (SApp (SVar "x", SVar "y"))
+    (parse_sterm "x (* a comment *) y");
+  check "parse: nested comment skipped" (SVar "x")
+    (parse_sterm "(* outer (* inner *) outer *) x");
   check "parse: unterminated comment" true (parse_fails "(* oops")
+
+(* typecheck / erasure *)
+
+let () =
+  check "erase: unit" Unit (erase SUnit);
+  check "erase: lam drops annotation"
+    (Lam ("x", Var "x"))
+    (erase (SLam ("x", Some TUnit, SVar "x")));
+  check "typecheck: id"
+    (Ok (Lam ("x", Var "x"), TArrow (TUnit, TUnit)))
+    (typecheck (SLam ("x", Some TUnit, SVar "x")));
+  check "typecheck: missing annotation fails" true
+    (Result.is_error (typecheck (SLam ("x", None, SVar "x"))));
+  check "typecheck: unbound variable fails" true
+    (Result.is_error (typecheck (SVar "x")));
+  check "typecheck: argument type mismatch fails" true
+    (Result.is_error
+       (typecheck
+          (SApp
+             (SLam ("x", Some TUnit, SVar "x"), SLam ("y", Some TUnit, SVar "y")))));
+  check "typecheck: applying a non-function fails" true
+    (Result.is_error (typecheck (SApp (SUnit, SUnit))))
 
 (* end-to-end *)
 
 let () =
-  check "e2e: id" "\\y.(y)" (string_of_term (eval (parse "(\\x. x) (\\y. y)")));
+  check "e2e: id" "\\y.(y)"
+    (string_of_term (eval (fst (parse "(\\x:unit->unit. x) (\\y:unit. y)"))));
   check "e2e: K" "\\z.(z)"
-    (string_of_term (eval (parse "(\\x. \\y. x) (\\z. z) (\\w. w)")));
-  check "e2e: stuck" "\\x.(x) y" (string_of_term (eval (parse "(\\x. x) y")))
+    (string_of_term
+       (eval
+          (fst
+             (parse
+                "(\\x:unit->unit. \\y:unit->unit. x) (\\z:unit. z) (\\w:unit. \
+                 w)"))));
+  check "e2e: unbound variable rejected" true
+    (typecheck_fails "(\\x:unit. x) y");
+  check "e2e: argument type mismatch rejected" true
+    (typecheck_fails "(\\x:unit. x) (\\y:unit. y)")
 
 (* file reading and execution *)
 
 let () =
   check "file: multi-line terms and comments"
-    [ "\\x.(x)"; "\\y.(y)"; "\\x.(\\y.(x))" ]
-    (capture_run_file "sample1.ulc");
+    [
+      "\\x.(x) : unit -> unit";
+      "\\y.(y) : unit -> unit";
+      "\\x.(\\y.(x)) : unit -> unit -> unit";
+    ]
+    (capture_run_file "sample1.stlc");
   check "file: execution continues after a bad phrase"
-    [ "\\x.(x)"; "LOG:[ERROR] syntax error"; "\\y.(y)" ]
-    (capture_run_file "sample2.ulc")
+    [
+      "\\x.(x) : unit -> unit"; "[ERROR] syntax error"; "\\y.(y) : unit -> unit";
+    ]
+    (capture_run_file "sample2.stlc")
 
 (* Report *)
 
