@@ -30,22 +30,30 @@ $$
 $$
 Or, "in **typing context** Gamma, e has type T."
 A typing context is simply a map from variables to the types that they posess.
-Using this notation, let's define a set of typing rules for the language:
+Using this notation, let's define a set of typing rules for the language:\
+
 $$
 \frac{}{\Gamma \vdash () : \texttt{unit}}(\texttt{unit})
-\\\ \\
+$$
+$$
 \frac{}{\Gamma \vdash n : \texttt{nat}}(\texttt{nat})
-\\\ \\
+$$
+$$
 \frac{}{\Gamma \vdash \texttt{true}, \texttt{false} : \texttt{bool}}(\texttt{bool})
-\\\ \\
+$$
+$$
 \frac{\Gamma\ v = T}{\Gamma \vdash v : T}(var)
-\\\ \\
+$$
+$$
 \frac{\Gamma[v \gets T_2] \vdash E_1 : T_1}{\Gamma\ (\lambda v : T_2. E_1) : T_2 \to T_1}(abs)
-\\\ \\
+$$
+$$
 \frac{\Gamma \vdash E_1 : T_2 \to T_1 \quad \Gamma \vdash E_2 : T_2}{\Gamma \vdash E_1\ E_2 : T_1}(app)
-\\\ \\
+$$
+$$
 \frac{\Gamma \vdash b : \texttt{bool} \quad \Gamma \vdash E_1, E_2 : T}{\Gamma \vdash \texttt{if } b \texttt{ then } E_1 \texttt{ else } E_2 : T}(if)
-\\\ \\
+$$
+$$
 \frac{\Gamma \vdash n, m : \texttt{nat}}{\Gamma \vdash n \texttt{ == } m : \texttt{bool}}(eq)
 $$
 
@@ -71,9 +79,11 @@ But inspecting the [evaluation loop](./lib/driver.ml) shows that the computation
 
 ## Y-Combinator
 In the previous chapter, we saw the general-purpose fixpoint operator:
+
 $$
     \lambda f. (\lambda x. f (x\ x)) (\lambda x. f (x\ x))
 $$
+
 and observed that applying it to itself results in an infinite loop.
 This infinite loop occurs because the term $Y\ Y$ is **ill-typed**.
 In the STLC, we enforce well-typedness such that it is impossible to represent the Y-combinator.
