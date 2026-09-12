@@ -47,9 +47,11 @@ The reduction rules, in order of priority, are:
 
 This language has no types, allowing programmers to define poorly-typed terms.
 For example, consider the [Y-combinator](https://en.wikipedia.org/wiki/Fixed-point_combinator):
+
 $$
     \lambda f. (\lambda x. f (x\ x)) (\lambda x. f (x\ x))
 $$
+
 The Y-combinator acts as a general-purpose fixpoint operator, enabling general recursion.
 However, this value is not well-typed, and breaks soundness of the simple type systems we will see in this course.
 As a result, we are able to construct non-terminating programs, such as
