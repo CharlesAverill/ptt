@@ -1,0 +1,4 @@
+(executable
+ (public_name ulc)
+ (name main)
+ (libraries ptt))

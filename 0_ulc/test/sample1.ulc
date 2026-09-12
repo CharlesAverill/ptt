@@ -1,0 +1,9 @@
+\x.
+  x;;
+
+(\x.x)
+  (\y.y);;
+
+(* a (* nested *) comment *)
+\x.\y.
+  x;;
