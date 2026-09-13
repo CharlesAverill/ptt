@@ -1,0 +1,4 @@
+(test
+ (name test_bt)
+ (libraries ptt unix)
+ (deps sample1.bt sample2.bt))

@@ -1,0 +1,7 @@
+\x:unit.
+  x;;
+
+(\x:unit->unit.x) (\y.y);;
+
+(* a (* nested *) comment *)
+\x:unit.\y:unit.x;;

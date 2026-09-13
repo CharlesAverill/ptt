@@ -143,7 +143,7 @@ let () =
 let () =
   check "parse: var" (SVar "x") (parse_sterm "x");
   check "parse: lam"
-    (SLam ("x", TUnit, SVar "x"))
+    (SLam ("x", Some TUnit, SVar "x"))
     (parse_sterm "\\x:unit. x");
   check "parse: app" (SApp (SVar "x", SVar "y")) (parse_sterm "x y");
   check "parse: app left-assoc"
@@ -153,7 +153,7 @@ let () =
     (SApp (SVar "x", SApp (SVar "y", SVar "z")))
     (parse_sterm "x (y z)");
   check "parse: lam body extends right"
-    (SLam ("x", TUnit, SApp (SVar "x", SVar "y")))
+    (SLam ("x", Some TUnit, SApp (SVar "x", SVar "y")))
     (parse_sterm "\\x:unit. x y");
   check "parse: unit" SUnit (parse_sterm "()");
   check "parse: unmatched paren" true (parse_fails ")");
@@ -168,20 +168,22 @@ let () =
 (* typecheck / erasure *)
 
 let () =
-  check "erase: unit" Unit (erase SUnit);
+  check "erase: unit" (Ok Unit) (erase (SAnn (SUnit, TUnit)));
   check "erase: lam drops annotation"
-    (Lam ("x", Var "x"))
-    (erase (SLam ("x", TUnit, SVar "x")));
+    (Ok (Lam ("x", Var "x")))
+    (erase (SLam ("x", Some TUnit, SVar "x")));
+  check "typecheck: missing annotation fails" true
+    (Result.is_error (typecheck (SLam ("x", None, SVar "x"))));
   check "typecheck: id"
     (Ok (Lam ("x", Var "x"), TArrow (TUnit, TUnit)))
-    (typecheck (SLam ("x", TUnit, SVar "x")));
+    (typecheck (SLam ("x", Some TUnit, SVar "x")));
   check "typecheck: unbound variable fails" true
     (Result.is_error (typecheck (SVar "x")));
   check "typecheck: argument type mismatch fails" true
     (Result.is_error
        (typecheck
           (SApp
-             (SLam ("x", TUnit, SVar "x"), SLam ("y", TUnit, SVar "y")))));
+             (SLam ("x", Some TUnit, SVar "x"), SLam ("y", Some TUnit, SVar "y")))));
   check "typecheck: applying a non-function fails" true
     (Result.is_error (typecheck (SApp (SUnit, SUnit))))
 
@@ -211,12 +213,12 @@ let () =
       "\\y.(y) : unit -> unit";
       "\\x.(\\y.(x)) : unit -> unit -> unit";
     ]
-    (capture_run_file "sample1.stlc");
+    (capture_run_file "sample1.bt");
   check "file: execution continues after a bad phrase"
     [
       "\\x.(x) : unit -> unit"; "[ERROR] syntax error"; "\\y.(y) : unit -> unit";
     ]
-    (capture_run_file "sample2.stlc")
+    (capture_run_file "sample2.bt")
 
 (* Report *)
 

@@ -32,9 +32,11 @@ type sterm =
   (* x == y *)
   | SIseq of sterm * sterm
   (* \v:T.x *)
-  | SLam of string * typ * sterm
+  | SLam of string * (typ option) * sterm
   (* x1 x2 *)
   | SApp of sterm * sterm
+  (* e : T *)
+  | SAnn of sterm * typ
 
 (** Convert a [sterm] to a printable [string] *)
 let rec string_of_sterm (t : sterm) : string =
@@ -49,8 +51,12 @@ let rec string_of_sterm (t : sterm) : string =
   | SNat n -> string_of_int n
   | SIseq (n, m) -> string_of_sterm n ^ " == " ^ string_of_sterm m
   | SLam (v, ty, x) ->
-      "\\" ^ v ^ ":" ^ string_of_typ ty ^ ".(" ^ string_of_sterm x ^ ")"
+      let ty_str =
+        match ty with None -> "" | Some t -> ":" ^ string_of_typ t
+      in
+      "\\" ^ v ^ ty_str ^ ".(" ^ string_of_sterm x ^ ")"
   | SApp (x1, x2) -> string_of_sterm x1 ^ " " ^ string_of_sterm x2
+  | SAnn (e, t) -> "(" ^ string_of_sterm e ^ " : " ^ string_of_typ t ^ ")"
 
 (** Syntax tree after type erasure *)
 type term =

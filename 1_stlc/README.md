@@ -68,7 +68,7 @@ In practice, we are generally not interested in carrying typing information down
 Instead, **type erasure** is the common practice of erasing all typing information from a program once it has passed the type checker.
 This prevents us from having to carry around type data at runtime.
 
-Right now, the parser enforces that lambda functions always annotate the type.
+Right now, the parser and AST type enforce that lambda functions must always annotate the type.
 However, you can see that the types have been erased in the computational value in the following example:
 ```
 >> \x:bool.\y:nat.();;

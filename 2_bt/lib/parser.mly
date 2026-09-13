@@ -39,7 +39,9 @@ menhir_parse_phrase:
 
 term:
   | LAMBDA; id = IDENT; COLON; ty = typ; DOT; t = term
-      { let* t' = t in return (SLam (id, ty, t')) }
+      { let* t' = t in return (SLam (id, Some ty, t')) }
+  | LAMBDA; id = IDENT; DOT; t = term
+      { let* t' = t in return (SLam (id, None, t')) }
   | IF; b = term; THEN; c1 = term; ELSE; c2 = term
       { let* b' = b in
         let* c1' = c1 in
@@ -70,6 +72,9 @@ atom:
   | TRUE                     { return STrue }
   | FALSE                    { return SFalse }
   | n = INT                  { return (SNat n) }
+  | LPAREN; t = term; COLON; ty = typ; RPAREN
+                             { let* t' = t in
+                                return (SAnn (t', ty)) }
   | LPAREN; t = term; RPAREN { t }
 
 typ:

@@ -43,15 +43,15 @@ let rec typeof (gamma : typctx) (t : sterm) : (typed_term, string) result =
         fail
           (Printf.sprintf "Expected nats but got %s,%s" (string_of_typ xtyp)
              (string_of_typ ytyp))
-  (* G |- v : G v *)
+  (* G v = T => G |- v : T *)
   | SVar v -> (
       match gamma v with
       | Some ty -> return (Var v, ty)
       | None -> fail (Printf.sprintf "unbound variable %s" v))
-  (* G[v := t1] |- body : T1 => G |- \v:T2.body : T2 -> T1 *)
-  | SLam (v, Some t1, body) ->
-      let* body', t2 = typeof (update gamma v (Some t1)) body in
-      return (Lam (v, body'), TArrow (t1, t2))
+  (* G[v := t2] |- body : T1 => G |- \v:T2.body : T2 -> T1 *)
+  | SLam (v, t2, body) ->
+      let* body', t1 = typeof (update gamma v (Some t2)) body in
+      return (Lam (v, body'), TArrow (t2, t1))
   (* G |- E1 : (T2 -> T1) => G |- E2 : T2 => G |- e1 e2 : T1 *)
   | SApp (e1, e2) -> (
       let* e1', t1 = typeof gamma e1 in
@@ -66,9 +66,6 @@ let rec typeof (gamma : typctx) (t : sterm) : (typed_term, string) result =
           fail
             (Printf.sprintf "cannot apply non-function of type %s"
                (string_of_typ t1)))
-  | _ ->
-      fail
-        (Printf.sprintf "Type checking failed for term %s" (string_of_sterm t))
 
 (** Typecheck a closed [sterm] and produce a type-erased [term] and its [typ] *)
 let typecheck (t : sterm) : (typed_term, string) result =
