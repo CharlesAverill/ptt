@@ -18,8 +18,8 @@ opam install dune menhir ocamlformat
 0. [Untyped Lambda Calculus](./0_ulc) - an interpreter for the untyped lambda calculus, given as a base for students to develop on top of
 1. [Simply-Typed Lambda Calculus](./1_stlc) - a simple type system to the lambda calculus
 2. [Bidirectional Typing](./2_bt) - a precursor to robust type inference
-3. [Hindley-Milner Type Inference](./3_hm) - robust type inference for large inter-dependent programs
-4. [Parametric Polymorphism](./4_poly) - generic functions
+3. [Parametric Polymorphism](./3_poly) - System F and unification-based type inference
+4. [Hindley-Milner Type Inference](./4_hm) - robust type inference for large inter-dependent programs
 5. [Type operators](./5_ops) - template types/metaprogramming
 6. [Recursive types](./6_rt) - type definitions in the style of OCaml
 7. [Dependent types](./7_dt) - types dependent on values

@@ -76,12 +76,21 @@ and check (gamma : typctx) (t : sterm) (ty : typ) : (term, string) result =
           (Printf.sprintf "type mismatch: expected %s but got %s"
              (string_of_typ a) (string_of_typ b))
 
-(** Typecheck a closed [sterm] and produce a type-erased [term] and its [typ] *)
-let typecheck (t : sterm) : (typed_term, string) result =
-  synth (fun _ -> None) t
+(** Typecheck an [sterm] and produce a type-erased [term] and its [typ] *)
+let typecheck = synth
 
-(** Typecheck and erase a closed [sterm], raising [TypeError] if it is ill-typed
-*)
-let erase (t : sterm) : (term, string) result =
-  let* t', _ = typecheck t in
-  return t'
+(** Typecheck a top-level [sphrase] under [gamma], producing its type-erased
+    [phrase], its [typ], and the context under which subsequent phrases should
+    be typechecked. *)
+let typecheck_phrase (gamma : typctx) (p : sphrase) :
+    (typctx * phrase * typ, string) result =
+  match p with
+  | SPTerm t ->
+      let* t', ty = synth gamma t in
+      return (gamma, PTerm t', ty)
+  | SPDef (x, Some ty, e) ->
+      let* e' = check gamma e ty in
+      return (update gamma x (Some ty), PDef (x, e'), ty)
+  | SPDef (x, None, e) ->
+      let* e', ty = synth gamma e in
+      return (update gamma x (Some ty), PDef (x, e'), ty)

@@ -163,29 +163,42 @@ let () =
     (parse_sterm "x (* a comment *) y");
   check "parse: nested comment skipped" (SVar "x")
     (parse_sterm "(* outer (* inner *) outer *) x");
-  check "parse: unterminated comment" true (parse_fails "(* oops")
+  check "parse: unterminated comment" true (parse_fails "(* oops");
+  check "parse: def rejected as subexpression" true
+    (parse_fails "\\x:unit. def y = x");
+  check "parse: def rejected in application" true (parse_fails "(def y = x) y")
 
-(* typecheck / erasure *)
+(* typecheck_phrase *)
 
 let () =
-  check "erase: unit" (Ok Unit) (erase (SAnn (SUnit, TUnit)));
-  check "erase: lam drops annotation"
-    (Ok (Lam ("x", Var "x")))
-    (erase (SLam ("x", Some TUnit, SVar "x")));
-  check "typecheck: missing annotation fails" true
-    (Result.is_error (typecheck (SLam ("x", None, SVar "x"))));
-  check "typecheck: id"
-    (Ok (Lam ("x", Var "x"), TArrow (TUnit, TUnit)))
-    (typecheck (SLam ("x", Some TUnit, SVar "x")));
-  check "typecheck: unbound variable fails" true
-    (Result.is_error (typecheck (SVar "x")));
-  check "typecheck: argument type mismatch fails" true
-    (Result.is_error
-       (typecheck
-          (SApp
-             (SLam ("x", Some TUnit, SVar "x"), SLam ("y", Some TUnit, SVar "y")))));
-  check "typecheck: applying a non-function fails" true
-    (Result.is_error (typecheck (SApp (SUnit, SUnit))))
+  check "typecheck_phrase: plain term leaves context unchanged" true
+    (match typecheck_phrase (fun _ -> None) (SPTerm (SAnn (SUnit, TUnit))) with
+    | Ok (gamma', PTerm Unit, TUnit) -> gamma' "x" = None
+    | _ -> false);
+  check "typecheck_phrase: annotated def extends context" true
+    (match
+       typecheck_phrase (fun _ -> None) (SPDef ("x", Some TNat, SNat 5))
+     with
+    | Ok (gamma', PDef ("x", Nat 5), TNat) -> gamma' "x" = Some TNat
+    | _ -> false);
+  check "typecheck_phrase: unannotated def synthesizes and extends context" true
+    (match
+       typecheck_phrase
+         (fun _ -> None)
+         (SPDef ("id", None, SLam ("y", Some TUnit, SVar "y")))
+     with
+    | Ok (gamma', PDef ("id", Lam ("y", Var "y")), TArrow (TUnit, TUnit)) ->
+        gamma' "id" = Some (TArrow (TUnit, TUnit))
+    | _ -> false);
+  check "typecheck_phrase: later def can see earlier def's binding" true
+    (match
+       typecheck_phrase (fun _ -> None) (SPDef ("x", Some TNat, SNat 5))
+     with
+    | Ok (gamma', _, _) -> (
+        match typecheck_phrase gamma' (SPTerm (SVar "x")) with
+        | Ok (_, PTerm (Var "x"), TNat) -> true
+        | _ -> false)
+    | _ -> false)
 
 (* end-to-end *)
 
@@ -213,12 +226,20 @@ let () =
       "\\y.(y) : unit -> unit";
       "\\x.(\\y.(x)) : unit -> unit -> unit";
     ]
-    (capture_run_file "sample1.bt");
+    (capture_run_file "sample1.poly");
   check "file: execution continues after a bad phrase"
     [
       "\\x.(x) : unit -> unit"; "[ERROR] syntax error"; "\\y.(y) : unit -> unit";
     ]
-    (capture_run_file "sample2.bt")
+    (capture_run_file "sample2.poly");
+  check "file: defs persist across phrases and are substituted at use"
+    [
+      "def x = 5 : nat";
+      "def inc = \\y.(y == 5) : nat -> bool";
+      "5 : nat";
+      "true : bool";
+    ]
+    (capture_run_file "sample3.poly")
 
 (* Report *)
 

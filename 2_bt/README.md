@@ -1,6 +1,6 @@
 # Bidirectional Typing
 
-[Bidirectional Typing](https://arxiv.org/abs/1908.05839) - Dunfield and Krishnaswami
+[Bidirectional Typing](../reading/BidirectionalTyping.pdf) - Dunfield and Krishnaswami
 
 In the last chapter, we added a simple type system to our interpreter.
 In the process, we ended up requiring type annotations for lambda functions:

@@ -1,5 +1,7 @@
 # Simply-Typed Lambda Calculus
 
+[A Typechecker for STLC](https://softwarefoundations.cis.upenn.edu/plf-current/Typechecking.html)
+
 In this chapter we introduce the STLC and a basic typechecker, along with several pleasant constructs for the language.
 Our goal is to write a type checker that can run before any code executes, reporting to the programmer if the program's type is sound.
 
