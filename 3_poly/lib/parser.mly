@@ -91,10 +91,9 @@ eq:
       { a }
 
 app:
-  | a = app; LBRACE; ty = typ; RBRACE; at = atom
+  | a = app; LBRACE; ty = typ; RBRACE
       { let* a'  = a  in
-        let* at' = at in
-        return (SPolyApp (a', Some ty, at')) }
+        return (SPolyApp (a', Some ty)) }
   | a = app; at = atom
       { let* a'  = a  in
         let* at' = at in
@@ -117,11 +116,12 @@ typ:
   | t = typAtom             { t }
   | t1 = typ; ARROW; t2 = typ
                             { TArrow (t1, t2) }
-  | FORALL; id = IDENT; DOT; t = typ
+  | FORALL; id = TYPE_IDENT; DOT; t = typ
                             { TForall (id, t) } %prec FORALL
 
 typAtom:
   | TUNIT                    { TUnit }
   | BOOL                     { TBool }
   | NAT                      { TNat }
+  | id = TYPE_IDENT          { TVar id }
   | LPAREN; t = typ; RPAREN  { t }

@@ -99,6 +99,36 @@ let () =
     (Lam ("y0", Var "y"))
     (cas (Lam ("y", Var "x")) "x" (Var "y"))
 
+(* tfree *)
+
+let () =
+  check "tfree: var" [ "a" ] (tfree (TVar "a"));
+  check "tfree: primitive" [] (tfree TUnit);
+  check "tfree: arrow" [ "a"; "b" ] (tfree (TArrow (TVar "a", TVar "b")));
+  check "tfree: bound" [] (tfree (TForall ("a", TVar "a")));
+  check "tfree: mixed under forall" [ "b" ]
+    (tfree (TForall ("a", TArrow (TVar "a", TVar "b"))));
+  check "tfree: shadowing forall still binds" []
+    (tfree (TForall ("a", TForall ("a", TVar "a"))))
+
+(* tcas *)
+
+let () =
+  check "tcas: hit" (TVar "b") (tcas (TVar "a") "a" (TVar "b"));
+  check "tcas: miss" (TVar "c") (tcas (TVar "c") "a" (TVar "b"));
+  check "tcas: arrow"
+    (TArrow (TVar "b", TNat))
+    (tcas (TArrow (TVar "a", TNat)) "a" (TVar "b"));
+  check "tcas: shadow"
+    (TForall ("a", TVar "a"))
+    (tcas (TForall ("a", TVar "a")) "a" (TVar "b"));
+  check "tcas: under binder"
+    (TForall ("c", TVar "b"))
+    (tcas (TForall ("c", TVar "a")) "a" (TVar "b"));
+  check "tcas: avoids capture"
+    (TForall ("b0", TVar "b"))
+    (tcas (TForall ("b", TVar "a")) "a" (TVar "b"))
+
 (* is_value *)
 
 let () =
@@ -172,32 +202,101 @@ let () =
 
 let () =
   check "typecheck_phrase: plain term leaves context unchanged" true
-    (match typecheck_phrase (fun _ -> None) (SPTerm (SAnn (SUnit, TUnit))) with
-    | Ok (gamma', PTerm Unit, TUnit) -> gamma' "x" = None
+    (match typecheck_phrase empty_typctx (SPTerm (SAnn (SUnit, TUnit))) with
+    | Ok (gamma', PTerm Unit, TUnit) -> gamma'.terms "x" = None
     | _ -> false);
   check "typecheck_phrase: annotated def extends context" true
-    (match
-       typecheck_phrase (fun _ -> None) (SPDef ("x", Some TNat, SNat 5))
-     with
-    | Ok (gamma', PDef ("x", Nat 5), TNat) -> gamma' "x" = Some TNat
+    (match typecheck_phrase empty_typctx (SPDef ("x", Some TNat, SNat 5)) with
+    | Ok (gamma', PDef ("x", Nat 5), TNat) -> gamma'.terms "x" = Some TNat
     | _ -> false);
   check "typecheck_phrase: unannotated def synthesizes and extends context" true
     (match
-       typecheck_phrase
-         (fun _ -> None)
+       typecheck_phrase empty_typctx
          (SPDef ("id", None, SLam ("y", Some TUnit, SVar "y")))
      with
     | Ok (gamma', PDef ("id", Lam ("y", Var "y")), TArrow (TUnit, TUnit)) ->
-        gamma' "id" = Some (TArrow (TUnit, TUnit))
+        gamma'.terms "id" = Some (TArrow (TUnit, TUnit))
     | _ -> false);
   check "typecheck_phrase: later def can see earlier def's binding" true
-    (match
-       typecheck_phrase (fun _ -> None) (SPDef ("x", Some TNat, SNat 5))
-     with
+    (match typecheck_phrase empty_typctx (SPDef ("x", Some TNat, SNat 5)) with
     | Ok (gamma', _, _) -> (
         match typecheck_phrase gamma' (SPTerm (SVar "x")) with
         | Ok (_, PTerm (Var "x"), TNat) -> true
         | _ -> false)
+    | _ -> false)
+
+(* type_wf *)
+
+let () =
+  check "type_wf: closed primitive" true (type_wf empty_typctx TUnit);
+  check "type_wf: free tyvar rejected" false (type_wf empty_typctx (TVar "a"));
+  check "type_wf: bound tyvar accepted" true
+    (type_wf empty_typctx (TForall ("a", TVar "a")));
+  check "type_wf: free under forall rejected" false
+    (type_wf empty_typctx (TForall ("a", TVar "b")));
+  check "type_wf: arrow of bound tyvars" true
+    (type_wf empty_typctx (TForall ("a", TArrow (TVar "a", TVar "a"))))
+
+(* synth/check: polymorphism *)
+
+let () =
+  check "synth: tlam over unit" true
+    (match synth empty_typctx (STLam ("a", SAnn (SUnit, TUnit))) with
+    | Ok (Unit, TForall ("a", TUnit)) -> true
+    | _ -> false);
+  check "synth: tlam over id at tyvar" true
+    (match
+       synth empty_typctx (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")))
+     with
+    | Ok (Lam ("x", Var "x"), TForall ("a", TArrow (TVar "a", TVar "a"))) ->
+        true
+    | _ -> false);
+  check "check: tlam against forall" true
+    (match
+       Ptt.Typechecker.check empty_typctx
+         (STLam ("a", SUnit))
+         (TForall ("a", TUnit))
+     with
+    | Ok Unit -> true
+    | _ -> false);
+  check "synth: tlam erases" true
+    (match synth empty_typctx (STLam ("a", SAnn (SUnit, TUnit))) with
+    | Ok (Unit, _) -> true
+    | _ -> false)
+
+(* SPolyApp *)
+
+let () =
+  check "polyapp: instantiates binder" true
+    (match
+       synth empty_typctx
+         (SPolyApp
+            (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")), Some TNat))
+     with
+    | Ok (Lam ("x", Var "x"), TArrow (TNat, TNat)) -> true
+    | _ -> false);
+  check "polyapp: instantiates with arrow" true
+    (match
+       synth empty_typctx
+         (SPolyApp
+            ( STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")),
+              Some (TArrow (TUnit, TUnit)) ))
+     with
+    | Ok
+        ( Lam ("x", Var "x"),
+          TArrow (TArrow (TUnit, TUnit), TArrow (TUnit, TUnit)) ) ->
+        true
+    | _ -> false);
+  check "polyapp: ill-formed kappa rejected" true
+    (match
+       synth empty_typctx
+         (SPolyApp (STLam ("a", SAnn (SUnit, TUnit)), Some (TVar "b")))
+     with
+    | Error _ -> true
+    | _ -> false);
+  check "polyapp: non-polymorphic head rejected" true
+    (match synth empty_typctx (SPolyApp (SAnn (SUnit, TUnit), Some TNat)) with
+    | Error _ -> true
     | _ -> false)
 
 (* end-to-end *)
@@ -216,6 +315,15 @@ let () =
     (typecheck_fails "(\\x:unit. x) y");
   check "e2e: argument type mismatch rejected" true
     (typecheck_fails "(\\x:unit. x) (\\y:unit. y)")
+
+let () =
+  check "e2e: poly id instantiated"
+    (Ok (TArrow (TNat, TNat)))
+    (match parse "(/\\'a. \\x:'a. x)[nat]" with
+    | _, ty -> Ok ty
+    | exception TypeError m -> Error m);
+  check "e2e: free tyvar instantiation rejected" true
+    (typecheck_fails "(/\\'a. ())['b]")
 
 (* file reading and execution *)
 
@@ -239,7 +347,15 @@ let () =
       "5 : nat";
       "true : bool";
     ]
-    (capture_run_file "sample3.poly")
+    (capture_run_file "sample3.poly");
+  check "file: System F features are supported"
+    [
+      "\\x.(x) : forall 'b.('b -> 'b) -> forall 'b.('b -> 'b)";
+      "\\f.(f 5) : forall 'a.('a -> 'a) -> nat";
+      "[ERROR] Type forall 'a.('b) is not well-formed";
+      "\\x.(x) : forall 'b.('b -> 'b)";
+    ]
+    (capture_run_file "systemf.poly")
 
 (* Report *)
 

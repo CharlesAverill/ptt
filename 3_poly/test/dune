@@ -1,4 +1,4 @@
 (test
- (name test_bt)
+ (name test_poly)
  (libraries ptt unix)
- (deps sample1.poly sample2.poly sample3.poly))
+ (deps sample1.poly sample2.poly sample3.poly systemf.poly))

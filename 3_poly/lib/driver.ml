@@ -19,9 +19,10 @@ let parse_sterm (s : string) : sterm =
   | Error -> raise (ParseError "syntax error")
   | SyntaxError m -> raise (ParseError m)
 
-(** Parse and typecheck a [string] from an empty context into a type-erased [term] *)
+(** Parse and typecheck a [string] from an empty context into a type-erased
+    [term] *)
 let parse (s : string) : typed_term =
-  match typecheck (fun _ -> None) (parse_sterm s) with
+  match typecheck empty_typctx (parse_sterm s) with
   | Ok t -> t
   | Error s -> raise (TypeError s)
 
@@ -77,7 +78,9 @@ let rec loop (lexbuf : Lexing.lexbuf) (prompt : unit -> unit) (gamma : typctx)
       loop lexbuf prompt gamma' defs
   | Some (gamma', PDef (x, e), ty) ->
       let v = eval (subst_defs defs e) in
-      Printf.printf "%s : %s\n%!" (string_of_phrase (PDef (x, v))) (string_of_typ ty);
+      Printf.printf "%s : %s\n%!"
+        (string_of_phrase (PDef (x, v)))
+        (string_of_typ ty);
       loop lexbuf prompt gamma' (defs @ [ (x, v) ])
   | exception ParseError msg ->
       err "%s" msg;
@@ -90,11 +93,11 @@ let rec loop (lexbuf : Lexing.lexbuf) (prompt : unit -> unit) (gamma : typctx)
 (** Start the REPL *)
 let repl () =
   let lexbuf = Lexing.from_channel stdin in
-  loop lexbuf (fun () -> Printf.printf ">> %!") (fun _ -> None) []
+  loop lexbuf (fun () -> Printf.printf ">> %!") empty_typctx []
 
 (** Parse and execute a file *)
 let run_file (fn : string) =
   let fd = open_in fn in
   let lexbuf = Lexing.from_channel fd in
-  loop lexbuf (fun () -> ()) (fun _ -> None) [];
+  loop lexbuf (fun () -> ()) empty_typctx [];
   close_in fd

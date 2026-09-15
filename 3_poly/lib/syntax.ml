@@ -1,9 +1,11 @@
 (** Syntax definitions for the simply-typed lambda calculus *)
 
 (** Types of [term]s *)
-type typ = 
+type typ =
   (* Primitives *)
-  | TUnit | TBool | TNat 
+  | TUnit
+  | TBool
+  | TNat
   (* Type variables *)
   | TVar of string
   (* Functions *)
@@ -17,7 +19,8 @@ let rec string_of_typ (t : typ) : string =
   | TUnit -> "unit"
   | TBool -> "bool"
   | TNat -> "nat"
-  | TArrow (t1, t2) -> Printf.sprintf "%s -> %s" (string_of_typ t1) (string_of_typ t2)
+  | TArrow (t1, t2) ->
+      Printf.sprintf "%s -> %s" (string_of_typ t1) (string_of_typ t2)
   | TVar s -> s
   | TForall (s, t) -> Printf.sprintf "forall %s.(%s)" s (string_of_typ t)
 
@@ -45,8 +48,8 @@ type sterm =
   | SAnn of sterm * typ
   (* /\'a.e *)
   | STLam of (string * sterm)
-  (* e1 [t] e2 *)
-  | SPolyApp of (sterm * typ option * sterm)
+  (* e1 [t] *)
+  | SPolyApp of (sterm * typ option)
 
 (** Convert a [sterm] to a printable [string] *)
 let rec string_of_sterm (t : sterm) : string =
@@ -65,13 +68,14 @@ let rec string_of_sterm (t : sterm) : string =
       Printf.sprintf "\\%s%s.(%s)" v
         (match ty with None -> "" | Some t -> ":" ^ string_of_typ t)
         (string_of_sterm x)
-  | SApp (x1, x2) | SPolyApp (x1, None, x2) ->
+  | SApp (x1, x2) ->
       Printf.sprintf "%s %s" (string_of_sterm x1) (string_of_sterm x2)
   | SAnn (e, t) ->
       Printf.sprintf "(%s : %s)" (string_of_sterm e) (string_of_typ t)
   | STLam (s, t) -> Printf.sprintf "/\\%s.(%s)" s (string_of_sterm t)
-  | SPolyApp (e1, Some t, e2) ->
-      Printf.sprintf "%s [%s] %s" (string_of_sterm e1) (string_of_typ t) (string_of_sterm e2)
+  | SPolyApp (e, Some t) ->
+      Printf.sprintf "%s [%s]" (string_of_sterm e) (string_of_typ t)
+  | SPolyApp (e, None) -> string_of_sterm e
 
 (** Top-level concrete syntax trees *)
 type sphrase =
@@ -174,3 +178,24 @@ let rec cas (t : term) (s : string) (t' : term) : term =
   | Ifthenelse (x1, x2, x3) -> Ifthenelse (cas x1 s t', cas x2 s t', cas x3 s t')
   | App (x1, x2) -> App (cas x1 s t', cas x2 s t')
   | Iseq (x1, x2) -> Iseq (cas x1 s t', cas x2 s t')
+
+(** Determine the free variables of a [typ] *)
+let rec tfree (t : typ) : string list =
+  match t with
+  | TVar x -> [ x ]
+  | TUnit | TBool | TNat -> []
+  | TForall (v, x) -> List.filter (fun v' -> v <> v') (tfree x)
+  | TArrow (t1, t2) -> tfree t1 @ tfree t2
+
+(** Type-level capture avoiding substitution *)
+let rec tcas (t : typ) (s : string) (t' : typ) : typ =
+  match t with
+  | TUnit | TBool | TNat -> t
+  | TVar v -> if v <> s then t else t'
+  | TArrow (t1, t2) -> TArrow (tcas t1 s t', tcas t2 s t')
+  | TForall (v, x) ->
+      if v = s then t
+      else if not (List.mem v (tfree t')) then TForall (v, tcas x s t')
+      else
+        let v' = fresh v ((s :: tfree t') @ tfree x) in
+        TForall (v', tcas (tcas x v (TVar v')) s t')
