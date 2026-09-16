@@ -1,0 +1,4 @@
+(executable
+ (public_name tcons)
+ (name main)
+ (libraries ptt))

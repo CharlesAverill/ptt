@@ -1,0 +1,4 @@
+(test
+ (name test_tcons)
+ (libraries ptt unix)
+ (deps sample1.tcons sample2.tcons sample3.tcons systemf.tcons infer.tcons))
