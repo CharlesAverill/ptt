@@ -1,0 +1,7 @@
+def x : nat = 5;;
+
+def inc : nat -> bool = \y. y == x;;
+
+x;;
+
+inc 5;;

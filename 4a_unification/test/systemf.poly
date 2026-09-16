@@ -1,0 +1,6 @@
+(* Tests for System F parametric polymorphism features *)
+
+(/\'a. \x:'a. x) [forall 'b. 'b -> 'b];;
+\f : (forall 'a. 'a -> 'a). f [nat] 5;;
+def bad : forall 'a. 'b = ();;
+(/\'a.\x:'a.x : forall 'b. 'b -> 'b);;

@@ -1,0 +1,4 @@
+(executable
+ (public_name unif)
+ (name main)
+ (libraries ptt))
