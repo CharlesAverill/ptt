@@ -45,6 +45,13 @@ let rec types_eq (t1 : typ) (t2 : typ) : bool =
       types_eq (tcas x a (TVar gamma)) (tcas y b (TVar gamma))
   | _, _ -> false
 
+let rec type_wf (gamma : typctx) (t : typ) : bool =
+  match t with
+  | TUnit | TBool | TNat | TMetaVar _ -> true
+  | TVar v -> List.mem v gamma.tyvars
+  | TArrow (t1, t2) -> type_wf gamma t1 && type_wf gamma t2
+  | TForall (alpha, t') -> type_wf (update_tyvar gamma alpha true) t'
+
 type subst = (int * typ) list
 (** Type substitutions *)
 
@@ -110,31 +117,79 @@ let subst_unifies (s : subst) ((c1, c2) : constr) : bool =
 let subst_unifies_set (s : subst) (cs : constr_set) =
   List.fold_left (fun a c -> a && subst_unifies s c) true cs
 
-(** Generate a set of typing constraints required for an [sterm] to have type
-    [ty] under context [g] *)
-let rec get_constraints (g : typctx) (t : sterm) (ty : typ) :
-    (constr_set, string) result =
-  match (t, ty) with
+(** Generate fresh metavariables
+
+    This function is monotonic and will never return a duplicate metavariable *)
+let fresh_metavar : unit -> typ =
+  let counter = ref 0 in
+  fun () ->
+    let n = !counter in
+    counter := n + 1;
+    TMetaVar n
+
+(** Generate a set of typing constraints and a type [ty] required for an [sterm]
+    to have type [ty] under context [g] *)
+let rec get_constraints (g : typctx) (t : sterm) :
+    (typ * constr_set, string) result =
+  match t with
   (* CT-Var: x:T \in G => G |- x : T | {} *)
-  | SVar x, ty -> (
+  | SVar x -> (
       match lookup_term g x with
       | None -> fail (Printf.sprintf "Couldn't determine type of %s" x)
-      | Some ty' ->
-          if types_eq ty ty' then return []
+      | Some ty' -> return (ty', []))
+  | SUnit -> return (TUnit, [])
+  | STrue | SFalse -> return (TBool, [])
+  | SNat _ -> return (TNat, [])
+  (* CT-Abs: G[x := t1] |- e : t2' | C => G |- \x:t1.t2 : t1' -> t2' | C *)
+  | SLam (x, Some t1, e) ->
+      if type_wf g t1 then
+        let* t2, c = get_constraints (update_term g x t1) e in
+        return (TArrow (t1, t2), c)
+      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ t1))
+  | SLam (x, None, e) ->
+      let t1 = fresh_metavar () in
+      let* t2, c = get_constraints (update_term g x t1) e in
+      return (TArrow (t1, t2), c)
+  (* CT-If: *)
+  | SIfthenelse (b, e1, e2) ->
+      let* t1, c1 = get_constraints g b in
+      let* t2, c2 = get_constraints g e1 in
+      let* t3, c3 = get_constraints g e2 in
+      return (t2, c1 @ c2 @ c3 @ [ (t1, TBool); (t2, t3) ])
+  | SIseq (x1, x2) ->
+      let* t1, c1 = get_constraints g x1 in
+      let* t2, c2 = get_constraints g x2 in
+      return (TBool, c1 @ c2 @ [ (t1, TNat); (t2, TNat) ])
+  (* CT-App: G |- e1 : t1 | c1 => G |- e2 : T2 | C2 => G |- e1 e2 : x | C' *)
+  | SApp (e1, e2) ->
+      let* t1, c1 = get_constraints g e1 in
+      let* t2, c2 = get_constraints g e2 in
+      let x = fresh_metavar () in
+      return (x, c1 @ c2 @ [ (t1, TArrow (t2, x)) ])
+  | SAnn (e, ty) ->
+      if type_wf g ty then
+        let* t, c = get_constraints g e in
+        return (ty, c @ [ (ty, t) ])
+      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ ty))
+  | STLam (x, e) ->
+      let* t, c = get_constraints (update_tyvar g x true) e in
+      return (TForall (x, t), c)
+  | SPolyApp (e, Some kappa) -> (
+      let* t, c = get_constraints g e in
+      match t with
+      | TForall (alpha, body) ->
+          if type_wf g kappa then return (tcas body alpha kappa, c)
+            (* instantiate: body[kappa/alpha] *)
           else
             fail
-              (Printf.sprintf "Expected type %s but got %s" (string_of_typ ty)
-                 (string_of_typ ty')))
-  | SUnit, TUnit | STrue, TBool | SFalse, TBool | SNat _, TNat -> return []
-  (* CT-Abs: G[x := t1] |- e : t2' | C => G |- \x:t1.t2 : t1' -> t2' | C *)
-  | SLam (x, Some t1, e), TArrow (t1', t2') ->
-      if types_eq t1 t1' then get_constraints (update_term g x t1) e t2'
-      else
-        fail
-          (Printf.sprintf "Expected type %s but got %s" (string_of_typ t1)
-             (string_of_typ t1'))
-  (* CT-If: *)
-  | SIfthenelse (b, e1, e2) -> 
+              (Printf.sprintf "type %s is not well-formed" (string_of_typ kappa))
+      | _ ->
+          fail
+            (Printf.sprintf "expected a polymorphic type but got %s"
+               (string_of_typ t)))
+  | SPolyApp (e, None) ->
+      fail
+        "Unable to generate constraints for implicit polymorphic applications"
 
 (* 
 (** Typecheck an [sterm] and produce a type-erased [term] and its [typ] *)
