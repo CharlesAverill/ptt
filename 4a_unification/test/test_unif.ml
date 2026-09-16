@@ -203,11 +203,11 @@ let () =
 let () =
   check "typecheck_phrase: plain term leaves context unchanged" true
     (match typecheck_phrase empty_typctx (SPTerm (SAnn (SUnit, TUnit))) with
-    | Ok (gamma', PTerm Unit, TUnit) -> gamma'.terms "x" = None
+    | Ok (gamma', PTerm Unit, TUnit) -> lookup_term gamma' "x" = None
     | _ -> false);
   check "typecheck_phrase: annotated def extends context" true
     (match typecheck_phrase empty_typctx (SPDef ("x", Some TNat, SNat 5)) with
-    | Ok (gamma', PDef ("x", Nat 5), TNat) -> gamma'.terms "x" = Some TNat
+    | Ok (gamma', PDef ("x", Nat 5), TNat) -> lookup_term gamma' "x" = Some TNat
     | _ -> false);
   check "typecheck_phrase: unannotated def synthesizes and extends context" true
     (match
@@ -215,7 +215,7 @@ let () =
          (SPDef ("id", None, SLam ("y", Some TUnit, SVar "y")))
      with
     | Ok (gamma', PDef ("id", Lam ("y", Var "y")), TArrow (TUnit, TUnit)) ->
-        gamma'.terms "id" = Some (TArrow (TUnit, TUnit))
+        lookup_term gamma' "id" = Some (TArrow (TUnit, TUnit))
     | _ -> false);
   check "typecheck_phrase: later def can see earlier def's binding" true
     (match typecheck_phrase empty_typctx (SPDef ("x", Some TNat, SNat 5)) with
@@ -237,65 +237,39 @@ let () =
   check "type_wf: arrow of bound tyvars" true
     (type_wf empty_typctx (TForall ("a", TArrow (TVar "a", TVar "a"))))
 
-(* synth/check: polymorphism *)
+(* polymorphism *)
 
 let () =
-  check "synth: tlam over unit" true
-    (match synth empty_typctx (STLam ("a", SAnn (SUnit, TUnit))) with
-    | Ok (Unit, TForall ("a", TUnit)) -> true
+  check "gen: tlam over unit" true
+    (match get_constraints empty_typctx (STLam ("a", SAnn (SUnit, TUnit))) with
+    | Ok (TForall ("a", TUnit), _) -> true
     | _ -> false);
-  check "synth: tlam over id at tyvar" true
+  check "gen: tlam over id at tyvar" true
     (match
-       synth empty_typctx (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")))
+       get_constraints empty_typctx
+         (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")))
      with
-    | Ok (Lam ("x", Var "x"), TForall ("a", TArrow (TVar "a", TVar "a"))) ->
-        true
+    | Ok (TForall ("a", TArrow (TVar "a", TVar "a")), _) -> true
     | _ -> false);
-  check "check: tlam against forall" true
+  check "gen: polyapp instantiates binder" true
     (match
-       Ptt.Typechecker.check empty_typctx
-         (STLam ("a", SUnit))
-         (TForall ("a", TUnit))
-     with
-    | Ok Unit -> true
-    | _ -> false);
-  check "synth: tlam erases" true
-    (match synth empty_typctx (STLam ("a", SAnn (SUnit, TUnit))) with
-    | Ok (Unit, _) -> true
-    | _ -> false)
-
-(* SPolyApp *)
-
-let () =
-  check "polyapp: instantiates binder" true
-    (match
-       synth empty_typctx
+       get_constraints empty_typctx
          (SPolyApp
             (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")), Some TNat))
      with
-    | Ok (Lam ("x", Var "x"), TArrow (TNat, TNat)) -> true
+    | Ok (TArrow (TNat, TNat), _) -> true
     | _ -> false);
-  check "polyapp: instantiates with arrow" true
+  check "gen: polyapp ill-formed kappa rejected" true
     (match
-       synth empty_typctx
-         (SPolyApp
-            ( STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")),
-              Some (TArrow (TUnit, TUnit)) ))
-     with
-    | Ok
-        ( Lam ("x", Var "x"),
-          TArrow (TArrow (TUnit, TUnit), TArrow (TUnit, TUnit)) ) ->
-        true
-    | _ -> false);
-  check "polyapp: ill-formed kappa rejected" true
-    (match
-       synth empty_typctx
+       get_constraints empty_typctx
          (SPolyApp (STLam ("a", SAnn (SUnit, TUnit)), Some (TVar "b")))
      with
     | Error _ -> true
     | _ -> false);
-  check "polyapp: non-polymorphic head rejected" true
-    (match synth empty_typctx (SPolyApp (SAnn (SUnit, TUnit), Some TNat)) with
+  check "gen: polyapp non-polymorphic head rejected" true
+    (match
+       get_constraints empty_typctx (SPolyApp (SAnn (SUnit, TUnit), Some TNat))
+     with
     | Error _ -> true
     | _ -> false)
 
@@ -355,7 +329,24 @@ let () =
       "[ERROR] Type forall 'a.('b) is not well-formed";
       "\\x.(x) : forall 'b.('b -> 'b)";
     ]
-    (capture_run_file "systemf.unif")
+    (capture_run_file "systemf.unif");
+  check "file: Type inference"
+    [
+      "\\x.(x) : ?A -> ?A";
+      "5 : nat";
+      "\\x.(x == 5) : nat -> bool";
+      "false : bool";
+      "\\f.(f 5) : nat -> ?H -> ?H";
+      "\\f.(\\x.(f x)) : ?J -> ?K -> ?J -> ?K";
+      "true : bool";
+      "\\x.(if x then 5 else 6) : bool -> nat";
+      "[ERROR] Unification failure, ?Q <> ?Q -> ?R";
+      "\\y.(y) : ?T -> ?T";
+      "\\f.(\\x.(f f x)) : ?Y -> ?Y -> ?Y -> ?Y";
+      "def id = \\x.(x) : ?Z -> ?Z";
+      "5 : nat";
+      "true : bool";
+    ] (capture_run_file "infer.unif")
 
 (* Report *)
 

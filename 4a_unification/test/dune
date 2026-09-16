@@ -1,4 +1,4 @@
 (test
  (name test_unif)
  (libraries ptt unix)
- (deps sample1.unif sample2.unif sample3.unif systemf.unif))
+ (deps sample1.unif sample2.unif sample3.unif systemf.unif infer.unif))

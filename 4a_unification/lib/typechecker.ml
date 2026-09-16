@@ -117,15 +117,20 @@ let subst_unifies (s : subst) ((c1, c2) : constr) : bool =
 let subst_unifies_set (s : subst) (cs : constr_set) =
   List.fold_left (fun a c -> a && subst_unifies s c) true cs
 
+(** Counter backing [fresh_metavar] *)
+let metavar_counter : int ref = ref 0
+
+(** Reset the metavariable counter, e.g. at the start of a new typechecking session *)
+let reset_metavar_counter () : unit = metavar_counter := 0
+
 (** Generate fresh metavariables
 
-    This function is monotonic and will never return a duplicate metavariable *)
-let fresh_metavar : unit -> typ =
-  let counter = ref 0 in
-  fun () ->
-    let n = !counter in
-    counter := n + 1;
-    TMetaVar n
+    This function is monotonic and will never return a duplicate metavariable
+    within a session *)
+let fresh_metavar () : typ =
+  let n = !metavar_counter in
+  metavar_counter := n + 1;
+  TMetaVar n
 
 (** Generate a set of typing constraints and a type [ty] required for an [sterm]
     to have type [ty] under context [g] *)
@@ -191,9 +196,67 @@ let rec get_constraints (g : typctx) (t : sterm) :
       fail
         "Unable to generate constraints for implicit polymorphic applications"
 
-(* 
-(** Typecheck an [sterm] and produce a type-erased [term] and its [typ] *)
-let typecheck = synth
+(** Whether a metavariable [x] occurs in a type [t] *)
+let rec occurs (x : int) (t : typ) : bool =
+  match t with
+  | TMetaVar x' when x = x' -> true
+  | TArrow (t1, t2) -> occurs x t1 || occurs x t2
+  | TForall (_, t') -> occurs x t'
+  | _ -> false
+
+(** Perform a type substitution in a constraint set *)
+let constr_subst (s : subst) (cs : constr_set) : constr_set =
+  List.map (fun (a, b) -> (type_subst s a, type_subst s b)) cs
+
+(** Generate a solution to a set of constraints through unification *)
+let rec unify (c : constr_set) : (subst, string) result =
+  match c with
+  | [] -> return []
+  | (s, t) :: c' -> (
+      if types_eq s t then unify c'
+      else
+        match (s, t) with
+        | TMetaVar x, _ when not (occurs x t) ->
+            let* c'' = unify (constr_subst [ (x, t) ] c') in
+            return (compose c'' [ (x, t) ])
+        | _, TMetaVar x when not (occurs x s) ->
+            let* c'' = unify (constr_subst [ (x, s) ] c') in
+            return (compose c'' [ (x, s) ])
+        | TArrow (s1, s2), TArrow (t1, t2) -> unify (c' @ [ (s1, t1); (s2, t2) ])
+        (* s = forall a.A, t = forall b.B
+
+           This case only occurs when s and t are not alpha-equivalent,
+           otherwise the types_eq would have returned true *)
+        | TForall (a, sb), TForall (b, tb) ->
+            let c = fresh "c" (tfree sb @ tfree tb) in
+            (* unify ({A[a := c] = B[b := c]} \cup c')*)
+            unify ((tcas sb a (TVar c), tcas tb b (TVar c)) :: c')
+        | s, t ->
+            fail
+              (Printf.sprintf "Unification failure, %s <> %s" (string_of_typ s)
+                 (string_of_typ t)))
+
+(** Erase the types of an [sterm] *)
+let rec erase (t : sterm) : term =
+  match t with
+  | SUnit -> Unit
+  | STrue -> True
+  | SFalse -> False
+  | SNat n -> Nat n
+  | SVar v -> Var v
+  | SIfthenelse (b, e1, e2) -> Ifthenelse (erase b, erase e1, erase e2)
+  | SIseq (x1, x2) -> Iseq (erase x1, erase x2)
+  | SLam (s, _, e) -> Lam (s, erase e)
+  | SApp (e1, e2) -> App (erase e1, erase e2)
+  | SAnn (e, _) -> erase e
+  | STLam (_, e) -> erase e
+  | SPolyApp (e, _) -> erase e
+
+(** Typecheck an [sterm] in context [gamma] *)
+let typecheck (g : typctx) (t : sterm) : (typed_term, string) result =
+  let* s, c = get_constraints g t in
+  let* sigma = unify c in
+  return (erase t, type_subst sigma s)
 
 (** Typecheck a top-level [sphrase] under [gamma], producing its type-erased
     [phrase], its [typ], and the context under which subsequent phrases should
@@ -202,13 +265,14 @@ let typecheck_phrase (gamma : typctx) (p : sphrase) :
     (typctx * phrase * typ, string) result =
   match p with
   | SPTerm t ->
-      let* t', ty = synth gamma t in
+      let* t', ty = typecheck gamma t in
       return (gamma, PTerm t', ty)
   | SPDef (x, Some ty, e) ->
       if type_wf gamma ty then
-        let* e' = check gamma e ty in
-        return (update_term gamma x (Some ty), PDef (x, e'), ty)
+        let* e', inferred = typecheck gamma e in
+        let* _ = unify [ (ty, inferred) ] in
+        return (update_term gamma x ty, PDef (x, e'), ty)
       else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ ty))
   | SPDef (x, None, e) ->
-      let* e', ty = synth gamma e in
-      return (update_term gamma x (Some ty), PDef (x, e'), ty) *)
+      let* e', ty = typecheck gamma e in
+      return (update_term gamma x ty, PDef (x, e'), ty)

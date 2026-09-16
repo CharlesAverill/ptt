@@ -22,6 +22,7 @@ let parse_sterm (s : string) : sterm =
 (** Parse and typecheck a [string] from an empty context into a type-erased
     [term] *)
 let parse (s : string) : typed_term =
+  reset_metavar_counter ();
   match typecheck empty_typctx (parse_sterm s) with
   | Ok t -> t
   | Error s -> raise (TypeError s)
@@ -92,11 +93,13 @@ let rec loop (lexbuf : Lexing.lexbuf) (prompt : unit -> unit) (gamma : typctx)
 
 (** Start the REPL *)
 let repl () =
+  reset_metavar_counter ();
   let lexbuf = Lexing.from_channel stdin in
   loop lexbuf (fun () -> Printf.printf ">> %!") empty_typctx []
 
 (** Parse and execute a file *)
 let run_file (fn : string) =
+  reset_metavar_counter ();
   let fd = open_in fn in
   let lexbuf = Lexing.from_channel fd in
   loop lexbuf (fun () -> ()) empty_typctx [];
