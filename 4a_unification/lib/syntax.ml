@@ -56,7 +56,9 @@ type sterm =
   (* /\'a.e *)
   | STLam of (string * sterm)
   (* e1 [t] *)
-  | SPolyApp of (sterm * typ option)
+  | SPolyApp of (sterm * typ)
+  (* let v [: t] = e1 in e2 *)
+  | SLet of (string * typ option * sterm * sterm)
 
 (** Convert a [sterm] to a printable [string] *)
 let rec string_of_sterm (t : sterm) : string =
@@ -80,9 +82,14 @@ let rec string_of_sterm (t : sterm) : string =
   | SAnn (e, t) ->
       Printf.sprintf "(%s : %s)" (string_of_sterm e) (string_of_typ t)
   | STLam (s, t) -> Printf.sprintf "/\\%s.(%s)" s (string_of_sterm t)
-  | SPolyApp (e, Some t) ->
+  | SPolyApp (e, t) ->
       Printf.sprintf "%s [%s]" (string_of_sterm e) (string_of_typ t)
-  | SPolyApp (e, None) -> string_of_sterm e
+  | SLet (v, Some t, e1, e2) ->
+      Printf.sprintf "let %s : %s = %s in %s" v (string_of_typ t)
+        (string_of_sterm e1) (string_of_sterm e2)
+  | SLet (v, None, e1, e2) ->
+      Printf.sprintf "let %s = %s in %s" v (string_of_sterm e1)
+        (string_of_sterm e2)
 
 (** Top-level concrete syntax trees *)
 type sphrase =

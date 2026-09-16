@@ -91,12 +91,15 @@ let rec sterm_type_subst (s : subst) (t : sterm) : sterm =
   | SLam (x, None, e) -> SLam (x, None, sterm_type_subst s e)
   | SLam (x, Some ty, e) ->
       SLam (x, Some (type_subst s ty), sterm_type_subst s e)
+  | SLet (x, Some t, e1, e2) ->
+    SLet (x, Some (type_subst s t), sterm_type_subst s e1, sterm_type_subst s e2)
+  | SLet (x, None, e1, e2) ->
+    SLet (x, None, sterm_type_subst s e1, sterm_type_subst s e2)
   | SApp (x1, x2) -> SApp (sterm_type_subst s x1, sterm_type_subst s x2)
   | SAnn (e, ty) -> SAnn (sterm_type_subst s e, type_subst s ty)
   | STLam (x, e) -> STLam (x, sterm_type_subst s e)
-  | SPolyApp (e1, Some ty) ->
-      SPolyApp (sterm_type_subst s e1, Some (type_subst s ty))
-  | SPolyApp (e1, None) -> SPolyApp (sterm_type_subst s e1, None)
+  | SPolyApp (e1, ty) ->
+      SPolyApp (sterm_type_subst s e1, type_subst s ty)
 
 (** Composition of type substitutions *)
 let compose (s : subst) (g : subst) : subst =
@@ -120,7 +123,8 @@ let subst_unifies_set (s : subst) (cs : constr_set) =
 (** Counter backing [fresh_metavar] *)
 let metavar_counter : int ref = ref 0
 
-(** Reset the metavariable counter, e.g. at the start of a new typechecking session *)
+(** Reset the metavariable counter, e.g. at the start of a new typechecking
+    session *)
 let reset_metavar_counter () : unit = metavar_counter := 0
 
 (** Generate fresh metavariables
@@ -179,12 +183,12 @@ let rec get_constraints (g : typctx) (t : sterm) :
   | STLam (x, e) ->
       let* t, c = get_constraints (update_tyvar g x true) e in
       return (TForall (x, t), c)
-  | SPolyApp (e, Some kappa) -> (
+  | SPolyApp (e, kappa) -> (
       let* t, c = get_constraints g e in
       match t with
       | TForall (alpha, body) ->
-          if type_wf g kappa then return (tcas body alpha kappa, c)
-            (* instantiate: body[kappa/alpha] *)
+          if type_wf g kappa then (* instantiate: body[kappa/alpha] *)
+            return (tcas body alpha kappa, c)
           else
             fail
               (Printf.sprintf "type %s is not well-formed" (string_of_typ kappa))
@@ -192,9 +196,16 @@ let rec get_constraints (g : typctx) (t : sterm) :
           fail
             (Printf.sprintf "expected a polymorphic type but got %s"
                (string_of_typ t)))
-  | SPolyApp (e, None) ->
-      fail
-        "Unable to generate constraints for implicit polymorphic applications"
+  | SLet (v, Some t, e1, e2) ->
+      if type_wf g t then
+        let* t1, c1 = get_constraints g e1 in
+        let* t2, c2 = get_constraints (update_term g v t) e2 in
+        return (t2, c1 @ c2 @ [ (t, t1) ])
+      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ t))
+  | SLet (v, None, e1, e2) ->
+    let* t1, c1 = get_constraints g e1 in
+    let* t2, c2 = get_constraints (update_term g v t1) e2 in
+    return (t2, c1 @ c2)
 
 (** Whether a metavariable [x] occurs in a type [t] *)
 let rec occurs (x : int) (t : typ) : bool =
@@ -251,6 +262,7 @@ let rec erase (t : sterm) : term =
   | SAnn (e, _) -> erase e
   | STLam (_, e) -> erase e
   | SPolyApp (e, _) -> erase e
+  | SLet (v, _, e1, e2) -> App (Lam (v, erase e2), erase e1)
 
 (** Typecheck an [sterm] in context [gamma] *)
 let typecheck (g : typctx) (t : sterm) : (typed_term, string) result =

@@ -74,11 +74,11 @@ term:
            (\id.t2) t1 *)
         let* t1' = t1 in
         let* t2' = t2 in
-        return (SApp (SLam (id, None, t2'), t1'))}
+        return (SLet (id, None, t1', t2')) }
   | LET; id = IDENT; COLON; ty = typ; EQ; t1 = term; IN; t2 = term
       { let* t1' = t1 in
         let* t2' = t2 in
-        return (SApp (SLam (id, Some ty, t2'), SAnn (t1', ty)))}
+        return (SLet (id, Some ty, t1', t2')) }
   | e = eq
       { e }
 
@@ -93,7 +93,7 @@ eq:
 app:
   | a = app; LBRACE; ty = typ; RBRACE
       { let* a'  = a  in
-        return (SPolyApp (a', Some ty)) }
+        return (SPolyApp (a', ty)) }
   | a = app; at = atom
       { let* a'  = a  in
         let* at' = at in

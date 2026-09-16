@@ -255,20 +255,20 @@ let () =
     (match
        get_constraints empty_typctx
          (SPolyApp
-            (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")), Some TNat))
+            (STLam ("a", SLam ("x", Some (TVar "a"), SVar "x")), TNat))
      with
     | Ok (TArrow (TNat, TNat), _) -> true
     | _ -> false);
   check "gen: polyapp ill-formed kappa rejected" true
     (match
        get_constraints empty_typctx
-         (SPolyApp (STLam ("a", SAnn (SUnit, TUnit)), Some (TVar "b")))
+         (SPolyApp (STLam ("a", SAnn (SUnit, TUnit)), TVar "b"))
      with
     | Error _ -> true
     | _ -> false);
   check "gen: polyapp non-polymorphic head rejected" true
     (match
-       get_constraints empty_typctx (SPolyApp (SAnn (SUnit, TUnit), Some TNat))
+       get_constraints empty_typctx (SPolyApp (SAnn (SUnit, TUnit), TNat))
      with
     | Error _ -> true
     | _ -> false)
@@ -346,7 +346,8 @@ let () =
       "def id = \\x.(x) : ?Z -> ?Z";
       "5 : nat";
       "true : bool";
-    ] (capture_run_file "infer.unif")
+    ]
+    (capture_run_file "infer.unif")
 
 (* Report *)
 
