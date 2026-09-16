@@ -1,4 +1,4 @@
-(** Unification-based typechecking and type erasure for System F *)
+(** Hindley-Milner Type Inference for System F *)
 
 open Syntax
 open Monads
@@ -92,14 +92,12 @@ let rec sterm_type_subst (s : subst) (t : sterm) : sterm =
   | SLam (x, Some ty, e) ->
       SLam (x, Some (type_subst s ty), sterm_type_subst s e)
   | SLet (x, Some t, e1, e2) ->
-    SLet (x, Some (type_subst s t), sterm_type_subst s e1, sterm_type_subst s e2)
+      SLet
+        (x, Some (type_subst s t), sterm_type_subst s e1, sterm_type_subst s e2)
   | SLet (x, None, e1, e2) ->
-    SLet (x, None, sterm_type_subst s e1, sterm_type_subst s e2)
+      SLet (x, None, sterm_type_subst s e1, sterm_type_subst s e2)
   | SApp (x1, x2) -> SApp (sterm_type_subst s x1, sterm_type_subst s x2)
   | SAnn (e, ty) -> SAnn (sterm_type_subst s e, type_subst s ty)
-  | STLam (x, e) -> STLam (x, sterm_type_subst s e)
-  | SPolyApp (e1, ty) ->
-      SPolyApp (sterm_type_subst s e1, type_subst s ty)
 
 (** Composition of type substitutions *)
 let compose (s : subst) (g : subst) : subst =
@@ -135,77 +133,6 @@ let fresh_metavar () : typ =
   let n = !metavar_counter in
   metavar_counter := n + 1;
   TMetaVar n
-
-(** Generate a set of typing constraints and a type [ty] required for an [sterm]
-    to have type [ty] under context [g] *)
-let rec get_constraints (g : typctx) (t : sterm) :
-    (typ * constr_set, string) result =
-  match t with
-  (* CT-Var: x:T \in G => G |- x : T | {} *)
-  | SVar x -> (
-      match lookup_term g x with
-      | None -> fail (Printf.sprintf "Couldn't determine type of %s" x)
-      | Some ty' -> return (ty', []))
-  | SUnit -> return (TUnit, [])
-  | STrue | SFalse -> return (TBool, [])
-  | SNat _ -> return (TNat, [])
-  (* CT-Abs: G[x := t1] |- e : t2' | C => G |- \x:t1.t2 : t1' -> t2' | C *)
-  | SLam (x, Some t1, e) ->
-      if type_wf g t1 then
-        let* t2, c = get_constraints (update_term g x t1) e in
-        return (TArrow (t1, t2), c)
-      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ t1))
-  | SLam (x, None, e) ->
-      let t1 = fresh_metavar () in
-      let* t2, c = get_constraints (update_term g x t1) e in
-      return (TArrow (t1, t2), c)
-  (* CT-If: *)
-  | SIfthenelse (b, e1, e2) ->
-      let* t1, c1 = get_constraints g b in
-      let* t2, c2 = get_constraints g e1 in
-      let* t3, c3 = get_constraints g e2 in
-      return (t2, c1 @ c2 @ c3 @ [ (t1, TBool); (t2, t3) ])
-  | SIseq (x1, x2) ->
-      let* t1, c1 = get_constraints g x1 in
-      let* t2, c2 = get_constraints g x2 in
-      return (TBool, c1 @ c2 @ [ (t1, TNat); (t2, TNat) ])
-  (* CT-App: G |- e1 : t1 | c1 => G |- e2 : T2 | C2 => G |- e1 e2 : x | C' *)
-  | SApp (e1, e2) ->
-      let* t1, c1 = get_constraints g e1 in
-      let* t2, c2 = get_constraints g e2 in
-      let x = fresh_metavar () in
-      return (x, c1 @ c2 @ [ (t1, TArrow (t2, x)) ])
-  | SAnn (e, ty) ->
-      if type_wf g ty then
-        let* t, c = get_constraints g e in
-        return (ty, c @ [ (ty, t) ])
-      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ ty))
-  | STLam (x, e) ->
-      let* t, c = get_constraints (update_tyvar g x true) e in
-      return (TForall (x, t), c)
-  | SPolyApp (e, kappa) -> (
-      let* t, c = get_constraints g e in
-      match t with
-      | TForall (alpha, body) ->
-          if type_wf g kappa then (* instantiate: body[kappa/alpha] *)
-            return (tcas body alpha kappa, c)
-          else
-            fail
-              (Printf.sprintf "type %s is not well-formed" (string_of_typ kappa))
-      | _ ->
-          fail
-            (Printf.sprintf "expected a polymorphic type but got %s"
-               (string_of_typ t)))
-  | SLet (v, Some t, e1, e2) ->
-      if type_wf g t then
-        let* t1, c1 = get_constraints g e1 in
-        let* t2, c2 = get_constraints (update_term g v t) e2 in
-        return (t2, c1 @ c2 @ [ (t, t1) ])
-      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ t))
-  | SLet (v, None, e1, e2) ->
-    let* t1, c1 = get_constraints g e1 in
-    let* t2, c2 = get_constraints (update_term g v t1) e2 in
-    return (t2, c1 @ c2)
 
 (** Whether a metavariable [x] occurs in a type [t] *)
 let rec occurs (x : int) (t : typ) : bool =
@@ -247,6 +174,101 @@ let rec unify (c : constr_set) : (subst, string) result =
               (Printf.sprintf "Unification failure, %s <> %s" (string_of_typ s)
                  (string_of_typ t)))
 
+(** Find all unification vars in a type *)
+let rec get_metavars (t : typ) : int list =
+  match t with
+  | TMetaVar x -> [ x ]
+  | TArrow (t1, t2) -> get_metavars t1 @ get_metavars t2
+  | TForall (_, e) -> get_metavars e
+  | _ -> []
+
+(** Find all type var names in a type *)
+let rec get_typevars (t : typ) : string list =
+  match t with
+  | TVar x -> [ x ]
+  | TForall (x, e) -> x :: get_typevars e
+  | TArrow (t1, t2) -> get_typevars t1 @ get_typevars t2
+  | _ -> []
+
+let rec instantiate (t : typ) : typ =
+  match t with
+  | TForall (a, body) -> instantiate (tcas body a (fresh_metavar ()))
+  | _ -> t
+
+(** Generalize a type by replacing any leftover unification vars with
+    polymorphism vars that are bound at the front *)
+let generalize (g : typctx) (t : typ) : typ =
+  let env_mvs = List.concat_map (fun (_, ty) -> get_metavars ty) g.terms in
+  let mvs =
+    List.filter
+      (fun m -> not (List.mem m env_mvs))
+      (List.sort_uniq compare (get_metavars t))
+  in
+  let new_tvs =
+    List.mapi (fun i _ -> "'" ^ fresh (letter i) (get_typevars t)) mvs
+  in
+  let mapping = List.map2 (fun mv tv -> (mv, TVar tv)) mvs new_tvs in
+  List.fold_left (fun acc v -> TForall (v, acc)) (type_subst mapping t) new_tvs
+
+(** Generate a set of typing constraints and a type [ty] required for an [sterm]
+    to have type [ty] under context [g] *)
+let rec get_constraints (g : typctx) (t : sterm) :
+    (typ * constr_set, string) result =
+  match t with
+  (* CT-Var: x:T \in G => G |- x : T | {} *)
+  | SVar x -> (
+      match lookup_term g x with
+      | None -> fail (Printf.sprintf "Couldn't determine type of %s" x)
+      | Some ty' -> return (instantiate ty', []))
+  | SUnit -> return (TUnit, [])
+  | STrue | SFalse -> return (TBool, [])
+  | SNat _ -> return (TNat, [])
+  (* CT-Abs: G[x := t1] |- e : t2' | C => G |- \x:t1.t2 : t1' -> t2' | C *)
+  | SLam (x, Some t1, e) ->
+      if type_wf g t1 then
+        let* t2, c = get_constraints (update_term g x t1) e in
+        return (TArrow (t1, t2), c)
+      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ t1))
+  | SLam (x, None, e) ->
+      let t1 = fresh_metavar () in
+      let* t2, c = get_constraints (update_term g x t1) e in
+      return (TArrow (t1, t2), c)
+  (* CT-If: *)
+  | SIfthenelse (b, e1, e2) ->
+      let* t1, c1 = get_constraints g b in
+      let* t2, c2 = get_constraints g e1 in
+      let* t3, c3 = get_constraints g e2 in
+      return (t2, c1 @ c2 @ c3 @ [ (t1, TBool); (t2, t3) ])
+  | SIseq (x1, x2) ->
+      let* t1, c1 = get_constraints g x1 in
+      let* t2, c2 = get_constraints g x2 in
+      return (TBool, c1 @ c2 @ [ (t1, TNat); (t2, TNat) ])
+  (* CT-App: G |- e1 : t1 | c1 => G |- e2 : T2 | C2 => G |- e1 e2 : x | C' *)
+  | SApp (e1, e2) ->
+      let* t1, c1 = get_constraints g e1 in
+      let* t2, c2 = get_constraints g e2 in
+      let x = fresh_metavar () in
+      return (x, c1 @ c2 @ [ (t1, TArrow (t2, x)) ])
+  | SAnn (e, ty) ->
+      if type_wf g ty then
+        let* t, c = get_constraints g e in
+        return (ty, c @ [ (ty, t) ])
+      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ ty))
+  | SLet (v, Some t, e1, e2) ->
+      if type_wf g t then
+        let* t1, c1 = get_constraints g e1 in
+        let* t2, c2 = get_constraints (update_term g v t) e2 in
+        return (t2, c1 @ c2 @ [ (t, t1) ])
+      else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ t))
+  | SLet (v, None, e1, e2) ->
+      let* t1, c1 = get_constraints g e1 in
+      let* c1_sol = unify c1 in
+      let principal_type = type_subst c1_sol t1 in
+      let g' = ctx_type_subst c1_sol g in
+      let t1' = generalize g' principal_type in
+      let* t2, c2 = get_constraints (update_term g v t1') e2 in
+      return (t2, c2)
+
 (** Erase the types of an [sterm] *)
 let rec erase (t : sterm) : term =
   match t with
@@ -260,8 +282,6 @@ let rec erase (t : sterm) : term =
   | SLam (s, _, e) -> Lam (s, erase e)
   | SApp (e1, e2) -> App (erase e1, erase e2)
   | SAnn (e, _) -> erase e
-  | STLam (_, e) -> erase e
-  | SPolyApp (e, _) -> erase e
   | SLet (v, _, e1, e2) -> App (Lam (v, erase e2), erase e1)
 
 (** Typecheck an [sterm] in context [gamma] *)
@@ -286,5 +306,8 @@ let typecheck_phrase (gamma : typctx) (p : sphrase) :
         return (update_term gamma x ty, PDef (x, e'), ty)
       else fail (Printf.sprintf "Type %s is not well-formed" (string_of_typ ty))
   | SPDef (x, None, e) ->
-      let* e', ty = typecheck gamma e in
-      return (update_term gamma x ty, PDef (x, e'), ty)
+      let* s, c = get_constraints gamma e in
+      let* sigma = unify c in
+      let principal = type_subst sigma s in
+      let scheme = generalize (ctx_type_subst sigma gamma) principal in
+      return (update_term gamma x scheme, PDef (x, erase e), scheme)

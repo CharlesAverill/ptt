@@ -1,0 +1,4 @@
+(test
+ (name test_hm)
+ (libraries ptt unix)
+ (deps sample.hm hm.hm infer.hm))

@@ -1,4 +1,4 @@
-(** Bidirectional Typechecking and type erasure for STLC *)
+(** Bidirectional Typechecking and type erasure for System F *)
 
 open Syntax
 open Monads

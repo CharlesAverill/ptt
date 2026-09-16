@@ -1,0 +1,13 @@
+def id = \x. x;;
+
+id 5;;
+
+id true;;
+
+def first = \x. \y. x;;
+
+first 5 true;;
+
+first true 5;;
+
+let id2 = \x. x in if id2 true then id2 5 else 6;;
