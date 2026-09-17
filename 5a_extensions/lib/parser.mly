@@ -41,6 +41,10 @@ open Monads
 %token VERT
 %token BIGARROW
 %token END
+%token LIST
+%token STAR
+%token PLUS
+%token BINDER
 // top-level definitions
 %token EQ
 %token DEF
@@ -51,6 +55,13 @@ open Monads
 // precedences
 %nonassoc FORALL
 %right ARROW
+%left PLUS
+%left STAR
+%nonassoc LIST
+
+%nonassoc BINDER
+%nonassoc ISEQ
+%right CONS
 
 %start <(Syntax.sterm, string) result> menhir_parse
 %start <(Syntax.sphrase option, string) result> menhir_parse_phrase
@@ -71,24 +82,24 @@ menhir_parse_phrase:
 
 term:
   | LAMBDA; id = IDENT; COLON; ty = typ; DOT; t = term
-      { let* t' = t in return (SLam (id, Some ty, t')) }
+      { let* t' = t in return (SLam (id, Some ty, t')) } %prec BINDER
   | LAMBDA; id = IDENT; DOT; t = term
-      { let* t' = t in return (SLam (id, None, t')) }
+      { let* t' = t in return (SLam (id, None, t')) } %prec BINDER
   | BIGLAM; id = TYPE_IDENT; DOT; t = term
-      { let* t' = t in return (STLam (id, t')) }
+      { let* t' = t in return (STLam (id, t')) } %prec BINDER
   | IF; b = term; THEN; c1 = term; ELSE; c2 = term
       { let* b' = b in
         let* c1' = c1 in
         let* c2' = c2 in
-        return (SIfthenelse (b', c1', c2')) }
+        return (SIfthenelse (b', c1', c2')) } %prec BINDER
   | LET; id = IDENT; EQ; t1 = term; IN; t2 = term
       { let* t1' = t1 in
         let* t2' = t2 in
-        return (SLet (id, None, t1', t2')) }
+        return (SLet (id, None, t1', t2')) } %prec BINDER
   | LET; id = IDENT; COLON; ty = typ; EQ; t1 = term; IN; t2 = term
       { let* t1' = t1 in
         let* t2' = t2 in
-        return (SLet (id, Some ty, t1', t2')) }
+        return (SLet (id, Some ty, t1', t2')) } %prec BINDER
   | MATCH; x = app; WITH;
       INL; y = IDENT; BIGARROW; e1 = term; VERT;
       INR; z = IDENT; BIGARROW; e2 = term; END
@@ -99,20 +110,12 @@ term:
       h = IDENT; CONS; t = IDENT; BIGARROW; e2 = term; END
       { let* x' = x in let* e1' = e1 in let* e2' = e2 in
         return (SListMatch (x', e1', h, t, e2')) }
-  | e = eq
-      { e }
-
-eq:
-  | a = cons_expr; ISEQ; b = cons_expr
+  | a = term; ISEQ; b = term
       { let* a' = a in
         let* b' = b in
-        return (SIseq (a', b')) }
-  | a = cons_expr
-      { a }
-
-cons_expr:
-  | a = app; CONS; b = cons_expr
-      { let* a' = a in let* b' = b in return (SCons (a', b')) }
+        return (SIseq (a', b')) } %prec ISEQ
+  | a = term; CONS; b = term
+      { let* a' = a in let* b' = b in return (SCons (a', b')) } %prec CONS
   | a = app
       { a }
 
@@ -145,6 +148,11 @@ typ:
   | t = typAtom             { t }
   | t1 = typ; ARROW; t2 = typ
                             { TArrow (t1, t2) }
+  | LIST; t = typ           { TList t }
+  | t1 = typ; STAR; t2 = typ
+                            { TProd (t1, t2) }
+  | t1 = typ; PLUS; t2 = typ
+                            { TSum (t1, t2) }
   | FORALL; id = TYPE_IDENT; DOT; t = typ
                             { TForall (id, t) } %prec FORALL
 

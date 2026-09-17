@@ -43,6 +43,7 @@ rule read =
   | "match"         { MATCH }
   | "with"          { WITH }
   | "end"           { END }
+  | "list"          { LIST }
   | "/\\"           { BIGLAM }
   | "=="            { ISEQ }
   | "="             { EQ }
@@ -53,6 +54,8 @@ rule read =
   | ";;"            { DSEMI }
   | "."             { DOT }
   | ","             { COMMA }
+  | "*"             { STAR }
+  | "+"             { PLUS }
   | ":"             { COLON }
   | "->"            { ARROW }
   | "("             { LPAREN }
