@@ -272,6 +272,112 @@ let () =
     | Error _ -> true
     | _ -> false)
 
+(* products *)
+
+let () =
+  check "type_wf: product of primitives" true
+    (type_wf empty_typctx (TProd (TUnit, TBool)));
+  check "gen: pair" true
+    (match
+       get_constraints empty_typctx
+         (SPair (SAnn (SNat 5, TNat), SAnn (STrue, TBool)))
+     with
+    | Ok (TProd (TNat, TBool), _) -> true
+    | _ -> false);
+  check "typecheck: fst resolves via unification" true
+    (match
+       typecheck empty_typctx
+         (SFst (SPair (SAnn (SNat 5, TNat), SAnn (STrue, TBool))))
+     with
+    | Ok (_, TNat) -> true
+    | _ -> false);
+  check "typecheck: snd resolves via unification" true
+    (match
+       typecheck empty_typctx
+         (SSnd (SPair (SAnn (SNat 5, TNat), SAnn (STrue, TBool))))
+     with
+    | Ok (_, TBool) -> true
+    | _ -> false);
+  check "typecheck: fst on non-product rejected" true
+    (match typecheck empty_typctx (SFst (SAnn (SNat 5, TNat))) with
+    | Error _ -> true
+    | _ -> false);
+  check "typecheck: snd on non-product rejected" true
+    (match typecheck empty_typctx (SSnd (SAnn (SNat 5, TNat))) with
+    | Error _ -> true
+    | _ -> false)
+
+(* sums *)
+
+let () =
+  check "type_wf: sum of primitives" true
+    (type_wf empty_typctx (TSum (TUnit, TBool)));
+  check "gen: inl leaves right branch open" true
+    (match get_constraints empty_typctx (SInl (SAnn (SNat 5, TNat))) with
+    | Ok (TSum (TNat, TMetaVar _), _) -> true
+    | _ -> false);
+  check "gen: inr leaves left branch open" true
+    (match get_constraints empty_typctx (SInr (SAnn (STrue, TBool))) with
+    | Ok (TSum (TMetaVar _, TBool), _) -> true
+    | _ -> false);
+  check "typecheck: match merges branch types" true
+    (match
+       typecheck empty_typctx
+         (SMatch
+            ( SInl (SAnn (SNat 5, TNat)),
+              "y",
+              SIseq (SVar "y", SNat 5),
+              "z",
+              SVar "z" ))
+     with
+    | Ok (_, TBool) -> true
+    | _ -> false);
+  check "typecheck: match rejects mismatched branch types" true
+    (match
+       typecheck empty_typctx
+         (SMatch (SInl (SAnn (SNat 5, TNat)), "y", SNat 5, "z", STrue))
+     with
+    | Error _ -> true
+    | _ -> false)
+
+(* lists *)
+
+let () =
+  check "type_wf: list of a primitive" true (type_wf empty_typctx (TList TNat));
+  check "gen: nil is polymorphic" true
+    (match get_constraints empty_typctx SNil with
+    | Ok (TList (TMetaVar _), _) -> true
+    | _ -> false);
+  check "typecheck: cons resolves element type" true
+    (match typecheck empty_typctx (SCons (SAnn (SNat 5, TNat), SNil)) with
+    | Ok (_, TList TNat) -> true
+    | _ -> false);
+  check "typecheck: cons rejects mismatched element and tail" true
+    (match
+       typecheck empty_typctx
+         (SCons (SAnn (STrue, TBool), SCons (SAnn (SNat 5, TNat), SNil)))
+     with
+    | Error _ -> true
+    | _ -> false);
+  check "typecheck: list match merges nil/cons branch types" true
+    (match
+       typecheck empty_typctx
+         (SListMatch
+            ( SCons (SAnn (SNat 5, TNat), SNil),
+              STrue,
+              "h",
+              "t",
+              SIseq (SVar "h", SNat 5) ))
+     with
+    | Ok (_, TBool) -> true
+    | _ -> false);
+  check "typecheck: self-referential list is rejected (occurs check)" true
+    (match
+       typecheck empty_typctx (SLam ("x", None, SCons (SVar "x", SVar "x")))
+     with
+    | Error _ -> true
+    | _ -> false)
+
 (* end-to-end *)
 
 let () =
@@ -298,6 +404,32 @@ let () =
   check "e2e: free tyvar instantiation rejected" true
     (typecheck_fails "(/\\'a. ())['b]")
 
+(* products, sums, lists: end-to-end *)
+
+let () =
+  check "e2e: fst reduces to the left component" "5"
+    (string_of_term (eval (fst (parse "fst (5, true)"))));
+  check "e2e: snd reduces to the right component" "true"
+    (string_of_term (eval (fst (parse "snd (5, true)"))));
+  check "e2e: sum match selects the inl branch" "true"
+    (string_of_term
+       (eval (fst (parse "match inl 5 with inl y => y == 5 | inr z => z end"))));
+  check "e2e: sum match selects the inr branch" "true"
+    (string_of_term
+       (eval
+          (fst (parse "match inr true with inl y => y == 5 | inr z => z end"))));
+  check "e2e: list match selects the cons branch" "true"
+    (string_of_term
+       (eval
+          (fst
+             (parse "match (1 :: []) with [] => false | h :: t => h == 1 end"))));
+  check "e2e: list match selects the nil branch" "true"
+    (string_of_term
+       (eval (fst (parse "match [] with [] => true | h :: t => false end"))));
+  check "e2e: fst on a non-product is rejected" true (typecheck_fails "fst 5");
+  check "e2e: mismatched cons element/tail rejected" true
+    (typecheck_fails "true :: (1 :: [])")
+
 (* file reading and execution *)
 
 let () =
@@ -306,21 +438,15 @@ let () =
       "\\x.(x) : unit -> unit";
       "\\y.(y) : unit -> unit";
       "\\x.(\\y.(x)) : unit -> unit -> unit";
-    ]
-    (capture_run_file "sample1.tcons");
-  check "file: execution continues after a bad phrase"
-    [
-      "\\x.(x) : unit -> unit"; "[ERROR] syntax error"; "\\y.(y) : unit -> unit";
-    ]
-    (capture_run_file "sample2.tcons");
-  check "file: defs persist across phrases and are substituted at use"
-    [
+      "\\x.(x) : unit -> unit";
+      "[ERROR] syntax error";
+      "\\y.(y) : unit -> unit";
       "def x = 5 : nat";
       "def inc = \\y.(y == 5) : nat -> bool";
       "5 : nat";
       "true : bool";
     ]
-    (capture_run_file "sample3.tcons");
+    (capture_run_file "sample.tcons");
   check "file: System F features are supported"
     [
       "\\x.(x) : forall 'b.('b -> 'b) -> forall 'b.('b -> 'b)";
@@ -331,18 +457,18 @@ let () =
     (capture_run_file "systemf.tcons");
   check "file: Type inference"
     [
-      "\\x.(x) : ?A -> ?A";
+      "\\x.(x) : ?a -> ?a";
       "5 : nat";
       "\\x.(x == 5) : nat -> bool";
       "false : bool";
-      "\\f.(f 5) : nat -> ?H -> ?H";
-      "\\f.(\\x.(f x)) : ?J -> ?K -> ?J -> ?K";
+      "\\f.(f 5) : nat -> ?h -> ?h";
+      "\\f.(\\x.(f x)) : ?j -> ?k -> ?j -> ?k";
       "true : bool";
       "\\x.(if x then 5 else 6) : bool -> nat";
-      "[ERROR] Unification failure, ?Q <> ?Q -> ?R";
-      "\\y.(y) : ?T -> ?T";
-      "\\f.(\\x.(f f x)) : ?Y -> ?Y -> ?Y -> ?Y";
-      "def id = \\x.(x) : ?Z -> ?Z";
+      "[ERROR] Unification failure, ?q <> ?q -> ?r";
+      "\\y.(y) : ?t -> ?t";
+      "\\f.(\\x.(f f x)) : ?y -> ?y -> ?y -> ?y";
+      "def id = \\x.(x) : ?z -> ?z";
       "5 : nat";
       "true : bool";
     ]

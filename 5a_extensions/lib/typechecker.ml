@@ -37,19 +37,24 @@ let update_tyvar (f : typctx) x y =
 let rec types_eq (t1 : typ) (t2 : typ) : bool =
   match (t1, t2) with
   | TVar x, TVar y when x = y -> true
+  | TMetaVar x, TMetaVar y when x = y -> true
   | TUnit, TUnit | TBool, TBool | TNat, TNat -> true
   | TArrow (t1, t2), TArrow (t3, t4) -> types_eq t1 t3 && types_eq t2 t4
   | TForall (a, x), TForall (b, y) when a = b -> types_eq x y
   | TForall (a, x), TForall (b, y) ->
       let gamma = fresh "gamma" (tfree x @ tfree y) in
       types_eq (tcas x a (TVar gamma)) (tcas y b (TVar gamma))
+  | TProd (t1, t2), TProd (t3, t4) | TSum (t1, t2), TSum (t3, t4) ->
+      types_eq t1 t3 && types_eq t2 t4
+  | TList t1, TList t2 -> types_eq t1 t2
   | _, _ -> false
 
 let rec type_wf (gamma : typctx) (t : typ) : bool =
   match t with
   | TUnit | TBool | TNat | TMetaVar _ -> true
   | TVar v -> List.mem v gamma.tyvars
-  | TArrow (t1, t2) | TProd (t1, t2) | TSum (t1, t2) -> type_wf gamma t1 && type_wf gamma t2
+  | TArrow (t1, t2) | TProd (t1, t2) | TSum (t1, t2) ->
+      type_wf gamma t1 && type_wf gamma t2
   | TForall (alpha, t') -> type_wf (update_tyvar gamma alpha true) t'
   | TList t' -> type_wf gamma t'
 
@@ -110,10 +115,20 @@ let rec sterm_type_subst (s : subst) (t : sterm) : sterm =
   | SInl x -> SInl (sterm_type_subst s x)
   | SInr x -> SInr (sterm_type_subst s x)
   | SMatch (x, y, e1, z, e2) ->
-    SMatch (sterm_type_subst s x, y, sterm_type_subst s e1, z, sterm_type_subst s e2)
+      SMatch
+        ( sterm_type_subst s x,
+          y,
+          sterm_type_subst s e1,
+          z,
+          sterm_type_subst s e2 )
   | SCons (h, t) -> SCons (sterm_type_subst s h, sterm_type_subst s t)
   | SListMatch (l, e1, h, t, e2) ->
-    SListMatch (sterm_type_subst s l, sterm_type_subst s e1, h, t, sterm_type_subst s e2)
+      SListMatch
+        ( sterm_type_subst s l,
+          sterm_type_subst s e1,
+          h,
+          t,
+          sterm_type_subst s e2 )
 
 (** Composition of type substitutions *)
 let compose (s : subst) (g : subst) : subst =
@@ -266,8 +281,10 @@ let rec get_constraints (g : typctx) (t : sterm) :
 let rec occurs (x : int) (t : typ) : bool =
   match t with
   | TMetaVar x' when x = x' -> true
-  | TArrow (t1, t2) -> occurs x t1 || occurs x t2
+  | TArrow (t1, t2) | TProd (t1, t2) | TSum (t1, t2) ->
+      occurs x t1 || occurs x t2
   | TForall (_, t') -> occurs x t'
+  | TList t' -> occurs x t'
   | _ -> false
 
 (** Perform a type substitution in a constraint set *)
@@ -298,13 +315,12 @@ let rec unify (c : constr_set) : (subst, string) result =
             (* unify ({A[a := c] = B[b := c]} \cup c')*)
             unify ((tcas sb a (TVar c), tcas tb b (TVar c)) :: c')
         | TProd (a, x), TProd (b, y) | TSum (a, x), TSum (b, y) ->
-            unify (c' @ [(a, b); (x, y)])
-        | TList a, TList b -> unify (c' @ [(a, b)])
+            unify (c' @ [ (a, b); (x, y) ])
+        | TList a, TList b -> unify (c' @ [ (a, b) ])
         | s, t ->
             fail
               (Printf.sprintf "Unification failure, %s <> %s" (string_of_typ s)
-                 (string_of_typ t))
-                 )
+                 (string_of_typ t)))
 
 (** Erase the types of an [sterm] *)
 let rec erase (t : sterm) : term =
