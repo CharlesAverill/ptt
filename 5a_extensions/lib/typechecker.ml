@@ -49,8 +49,9 @@ let rec type_wf (gamma : typctx) (t : typ) : bool =
   match t with
   | TUnit | TBool | TNat | TMetaVar _ -> true
   | TVar v -> List.mem v gamma.tyvars
-  | TArrow (t1, t2) -> type_wf gamma t1 && type_wf gamma t2
+  | TArrow (t1, t2) | TProd (t1, t2) | TSum (t1, t2) -> type_wf gamma t1 && type_wf gamma t2
   | TForall (alpha, t') -> type_wf (update_tyvar gamma alpha true) t'
+  | TList t' -> type_wf gamma t'
 
 type subst = (int * typ) list
 (** Type substitutions *)
@@ -72,6 +73,9 @@ let rec type_subst (s : subst) (t : typ) : typ =
   | TForall (x, t') -> TForall (x, type_subst s t')
   | TMetaVar x -> (
       match lookup_subst s x with Some t -> t | None -> TMetaVar x)
+  | TProd (t1, t2) -> TProd (type_subst s t1, type_subst s t2)
+  | TSum (t1, t2) -> TSum (type_subst s t1, type_subst s t2)
+  | TList t' -> TList (type_subst s t')
 
 (** Perform a type substitution on a context *)
 let ctx_type_subst (s : subst) (t : typctx) : typctx =
@@ -83,7 +87,7 @@ let ctx_type_subst (s : subst) (t : typctx) : typctx =
 (** Perform a type substitution on an sterm *)
 let rec sterm_type_subst (s : subst) (t : sterm) : sterm =
   match t with
-  | SUnit | STrue | SFalse | SNat _ | SVar _ -> t
+  | SUnit | STrue | SFalse | SNat _ | SVar _ | SNil -> t
   | SIfthenelse (b, c1, c2) ->
       SIfthenelse
         (sterm_type_subst s b, sterm_type_subst s c1, sterm_type_subst s c2)
@@ -100,6 +104,16 @@ let rec sterm_type_subst (s : subst) (t : sterm) : sterm =
   | SAnn (e, ty) -> SAnn (sterm_type_subst s e, type_subst s ty)
   | STLam (x, e) -> STLam (x, sterm_type_subst s e)
   | SPolyApp (e1, ty) -> SPolyApp (sterm_type_subst s e1, type_subst s ty)
+  | SPair (x, y) -> SPair (sterm_type_subst s x, sterm_type_subst s y)
+  | SFst x -> SFst (sterm_type_subst s x)
+  | SSnd x -> SSnd (sterm_type_subst s x)
+  | SInl x -> SInl (sterm_type_subst s x)
+  | SInr x -> SInr (sterm_type_subst s x)
+  | SMatch (x, y, e1, z, e2) ->
+    SMatch (sterm_type_subst s x, y, sterm_type_subst s e1, z, sterm_type_subst s e2)
+  | SCons (h, t) -> SCons (sterm_type_subst s h, sterm_type_subst s t)
+  | SListMatch (l, e1, h, t, e2) ->
+    SListMatch (sterm_type_subst s l, sterm_type_subst s e1, h, t, sterm_type_subst s e2)
 
 (** Composition of type substitutions *)
 let compose (s : subst) (g : subst) : subst =
@@ -206,6 +220,47 @@ let rec get_constraints (g : typctx) (t : sterm) :
       let* t1, c1 = get_constraints g e1 in
       let* t2, c2 = get_constraints (update_term g v t1) e2 in
       return (t2, c1 @ c2)
+  | SPair (x, y) ->
+      let* t1, c1 = get_constraints g x in
+      let* t2, c2 = get_constraints g y in
+      return (TProd (t1, t2), c1 @ c2)
+  | SFst x ->
+      let* t, c = get_constraints g x in
+      let v1, v2 = (fresh_metavar (), fresh_metavar ()) in
+      return (v1, c @ [ (t, TProd (v1, v2)) ])
+  | SSnd x ->
+      let* t, c = get_constraints g x in
+      let v1, v2 = (fresh_metavar (), fresh_metavar ()) in
+      return (v2, c @ [ (t, TProd (v1, v2)) ])
+  | SInl x ->
+      let* t, c = get_constraints g x in
+      let v2 = fresh_metavar () in
+      return (TSum (t, v2), c)
+  | SInr x ->
+      let* t, c = get_constraints g x in
+      let v1 = fresh_metavar () in
+      return (TSum (v1, t), c)
+  | SMatch (x, y, e1, z, e2) ->
+      let* tx, cx = get_constraints g x in
+      let mv1, mv2 = (fresh_metavar (), fresh_metavar ()) in
+      let* te1, ce1 = get_constraints (update_term g y mv1) e1 in
+      let* te2, ce2 = get_constraints (update_term g z mv2) e2 in
+      return (te1, cx @ ce1 @ ce2 @ [ (tx, TSum (mv1, mv2)); (te1, te2) ])
+  | SNil ->
+      let mv = fresh_metavar () in
+      return (TList mv, [])
+  | SCons (h, t) ->
+      let* th, ch = get_constraints g h in
+      let* tt, ct = get_constraints g t in
+      return (TList th, ch @ ct @ [ (tt, TList th) ])
+  | SListMatch (l, e1, h, t, e2) ->
+      let* tl, cl = get_constraints g l in
+      let elem = fresh_metavar () in
+      let* te1, ce1 = get_constraints g e1 in
+      let* te2, ce2 =
+        get_constraints (update_term (update_term g h elem) t (TList elem)) e2
+      in
+      return (te1, cl @ ce1 @ ce2 @ [ (tl, TList elem); (te1, te2) ])
 
 (** Whether a metavariable [x] occurs in a type [t] *)
 let rec occurs (x : int) (t : typ) : bool =
@@ -242,10 +297,14 @@ let rec unify (c : constr_set) : (subst, string) result =
             let c = fresh "c" (tfree sb @ tfree tb) in
             (* unify ({A[a := c] = B[b := c]} \cup c')*)
             unify ((tcas sb a (TVar c), tcas tb b (TVar c)) :: c')
+        | TProd (a, x), TProd (b, y) | TSum (a, x), TSum (b, y) ->
+            unify (c' @ [(a, b); (x, y)])
+        | TList a, TList b -> unify (c' @ [(a, b)])
         | s, t ->
             fail
               (Printf.sprintf "Unification failure, %s <> %s" (string_of_typ s)
-                 (string_of_typ t)))
+                 (string_of_typ t))
+                 )
 
 (** Erase the types of an [sterm] *)
 let rec erase (t : sterm) : term =
@@ -263,13 +322,46 @@ let rec erase (t : sterm) : term =
   | STLam (_, e) -> erase e
   | SPolyApp (e, _) -> erase e
   | SLet (v, _, e1, e2) -> App (Lam (v, erase e2), erase e1)
-  (* pair x y = \x.\y.\f. f x y*)
-  | SPair (x, y) -> Lam ("x", Lam ("y", Lam ("f", Ifthenelse (Var "f", erase x, erase y))))
-  (* fst x = \x.x true *)
-  | SFst x -> Lam ("x", App (Var "x", True))
-  (* snd x = \x.x false *)
-  | SSnd x -> Lam ("x", App (Var "x", False))
-  (* inl x = *)
+  (* pair a b = \f. f a b *)
+  | SPair (a, b) -> Lam ("f", App (App (Var "f", erase a), erase b))
+  (* fst p = p (\a.\b. a) *)
+  | SFst p -> App (erase p, Lam ("a", Lam ("b", Var "a")))
+  (* snd p = p (\a.\b. b) *)
+  | SSnd p -> App (erase p, Lam ("a", Lam ("b", Var "b")))
+  (* inl a = pair a true ;  inr a = pair a false
+     (payload in fst, tag in snd) *)
+  | SInl a -> Lam ("f", App (App (Var "f", erase a), True))
+  | SInr a -> Lam ("f", App (App (Var "f", erase a), False))
+  (* match s with inl y -> e1 | inr z -> e2  =
+       if (snd s) then (\y. e1) (fst s) else (\z. e2) (fst s) *)
+  | SMatch (s, y, e1, z, e2) ->
+      let s' = erase s in
+      let payload = App (s', Lam ("a", Lam ("b", Var "a"))) in
+      (* fst s *)
+      let tag = App (s', Lam ("a", Lam ("b", Var "b"))) in
+      (* snd s *)
+      Ifthenelse
+        (tag, App (Lam (y, erase e1), payload), App (Lam (z, erase e2), payload))
+  (* [] = \f. f () false
+     h :: t = \f. f (pair h t) true *)
+  | SNil -> Lam ("f", App (App (Var "f", Unit), False))
+  | SCons (h, t) ->
+      let ht = Lam ("g", App (App (Var "g", erase h), erase t)) in
+      (* pair h t *)
+      Lam ("f", App (App (Var "f", ht), True))
+  (* match l with [] -> e1 | h::t -> e2  =
+       if (snd l) then (\h.\t. e2) (fst (fst l)) (snd (fst l)) else e1 *)
+  | SListMatch (l, e1, h, t, e2) ->
+      let l' = erase l in
+      let sel_fst = Lam ("a", Lam ("b", Var "a")) in
+      let sel_snd = Lam ("a", Lam ("b", Var "b")) in
+      let cell = App (l', sel_fst) in
+      (* the (head,tail) pair, if cons *)
+      let tag = App (l', sel_snd) in
+      (* is-cons boolean *)
+      let hd = App (cell, sel_fst) in
+      let tl = App (cell, sel_snd) in
+      Ifthenelse (tag, App (App (Lam (h, Lam (t, erase e2)), hd), tl), erase e1)
 
 (** Typecheck an [sterm] in context [gamma] *)
 let typecheck (g : typctx) (t : sterm) : (typed_term, string) result =

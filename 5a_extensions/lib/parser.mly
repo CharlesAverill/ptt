@@ -8,6 +8,7 @@ open Monads
 %token <string> IDENT
 %token <string> TYPE_IDENT
 %token DOT
+%token COMMA
 // brackets
 %token LPAREN
 %token RPAREN
@@ -29,6 +30,17 @@ open Monads
 %token ISEQ
 %token LET
 %token IN
+%token FST
+%token SND
+%token INL
+%token INR
+%token NIL
+%token CONS
+%token MATCH
+%token WITH
+%token VERT
+%token BIGARROW
+%token END
 // top-level definitions
 %token EQ
 %token DEF
@@ -70,34 +82,49 @@ term:
         let* c2' = c2 in
         return (SIfthenelse (b', c1', c2')) }
   | LET; id = IDENT; EQ; t1 = term; IN; t2 = term
-      { (* let id = t1 in t2 is equivalent to 
-           (\id.t2) t1 *)
-        let* t1' = t1 in
+      { let* t1' = t1 in
         let* t2' = t2 in
         return (SLet (id, None, t1', t2')) }
   | LET; id = IDENT; COLON; ty = typ; EQ; t1 = term; IN; t2 = term
       { let* t1' = t1 in
         let* t2' = t2 in
         return (SLet (id, Some ty, t1', t2')) }
+  | MATCH; x = app; WITH;
+      INL; y = IDENT; BIGARROW; e1 = term; VERT;
+      INR; z = IDENT; BIGARROW; e2 = term; END
+      { let* x' = x in let* e1' = e1 in let* e2' = e2 in
+        return (SMatch (x', y, e1', z, e2')) }
+  | MATCH; x = app; WITH;
+      NIL; BIGARROW; e1 = term; VERT;
+      h = IDENT; CONS; t = IDENT; BIGARROW; e2 = term; END
+      { let* x' = x in let* e1' = e1 in let* e2' = e2 in
+        return (SListMatch (x', e1', h, t, e2')) }
   | e = eq
       { e }
 
 eq:
-  | a = app; ISEQ; b = app
+  | a = cons_expr; ISEQ; b = cons_expr
       { let* a' = a in
         let* b' = b in
         return (SIseq (a', b')) }
+  | a = cons_expr
+      { a }
+
+cons_expr:
+  | a = app; CONS; b = cons_expr
+      { let* a' = a in let* b' = b in return (SCons (a', b')) }
   | a = app
       { a }
 
 app:
+  | FST; a = atom   { let* a' = a in return (SFst a') }
+  | SND; a = atom   { let* a' = a in return (SSnd a') }
+  | INL; a = atom   { let* a' = a in return (SInl a') }
+  | INR; a = atom   { let* a' = a in return (SInr a') }
   | a = app; LBRACE; ty = typ; RBRACE
-      { let* a'  = a  in
-        return (SPolyApp (a', ty)) }
+      { let* a' = a in return (SPolyApp (a', ty)) }
   | a = app; at = atom
-      { let* a'  = a  in
-        let* at' = at in
-        return (SApp (a', at')) }
+      { let* a' = a in let* at' = at in return (SApp (a', at')) }
   | at = atom
       { at }
 
@@ -107,9 +134,11 @@ atom:
   | TRUE                     { return STrue }
   | FALSE                    { return SFalse }
   | n = INT                  { return (SNat n) }
+  | NIL                      { return SNil }
   | LPAREN; t = term; COLON; ty = typ; RPAREN
-                             { let* t' = t in
-                                return (SAnn (t', ty)) }
+                             { let* t' = t in return (SAnn (t', ty)) }
+  | LPAREN; t1 = term; COMMA; t2 = term; RPAREN
+      { let* t1' = t1 in let* t2' = t2 in return (SPair (t1', t2')) }
   | LPAREN; t = term; RPAREN { t }
 
 typ:

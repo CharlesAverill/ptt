@@ -117,15 +117,21 @@ let rec string_of_sterm (t : sterm) : string =
   | SLet (v, None, e1, e2) ->
       Printf.sprintf "let %s = %s in %s" v (string_of_sterm e1)
         (string_of_sterm e2)
-  | SPair (x, y) -> Printf.sprintf "(%s, %s)" (string_of_sterm x) (string_of_sterm y)
+  | SPair (x, y) ->
+      Printf.sprintf "(%s, %s)" (string_of_sterm x) (string_of_sterm y)
   | SFst x -> Printf.sprintf "fst %s" (string_of_sterm x)
   | SSnd x -> Printf.sprintf "snd %s" (string_of_sterm x)
   | SInl x -> Printf.sprintf "inl %s" (string_of_sterm x)
   | SInr x -> Printf.sprintf "inr %s" (string_of_sterm x)
-  | SMatch (t, x, e1, y, e2) -> Printf.sprintf "match %s with inl %s => %s | inr %s => %s end" (string_of_sterm t) x (string_of_sterm e1) y (string_of_sterm e2)
+  | SMatch (t, x, e1, y, e2) ->
+      Printf.sprintf "match %s with inl %s => %s | inr %s => %s end"
+        (string_of_sterm t) x (string_of_sterm e1) y (string_of_sterm e2)
   | SNil -> "[]"
-  | SCons (h, t) -> Printf.sprintf "%s :: %s" (string_of_sterm h) (string_of_sterm t)
-  | SListMatch (l, e1, h, t, e2) -> Printf.sprintf "match %s with [] => %s | %s :: %s => %s end" (string_of_sterm l) (string_of_sterm e1) h t (string_of_sterm e2)
+  | SCons (h, t) ->
+      Printf.sprintf "%s :: %s" (string_of_sterm h) (string_of_sterm t)
+  | SListMatch (l, e1, h, t, e2) ->
+      Printf.sprintf "match %s with [] => %s | %s :: %s => %s end"
+        (string_of_sterm l) (string_of_sterm e1) h t (string_of_sterm e2)
 
 (** Top-level concrete syntax trees *)
 type sphrase =

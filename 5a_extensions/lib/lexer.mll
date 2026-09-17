@@ -36,6 +36,13 @@ rule read =
   | "let"           { LET }
   | "in"            { IN }
   | "forall"        { FORALL }
+  | "fst"           { FST }
+  | "snd"           { SND }
+  | "inl"           { INL }
+  | "inr"           { INR }
+  | "match"         { MATCH }
+  | "with"          { WITH }
+  | "end"           { END }
   | "/\\"           { BIGLAM }
   | "=="            { ISEQ }
   | "="             { EQ }
@@ -45,12 +52,17 @@ rule read =
   | num             { INT (int_of_string (Lexing.lexeme lexbuf)) }
   | ";;"            { DSEMI }
   | "."             { DOT }
+  | ","             { COMMA }
   | ":"             { COLON }
   | "->"            { ARROW }
   | "("             { LPAREN }
   | ")"             { RPAREN }
   | "["             { LBRACE }
   | "]"             { RBRACE }
+  | "[]"            { NIL }
+  | "::"            { CONS }
+  | "|"             { VERT }
+  | "=>"            { BIGARROW }
   | eof             { EOF }
   | _ as c          { raise (SyntaxError (Printf.sprintf "unexpected character: %c" c)) }
 
