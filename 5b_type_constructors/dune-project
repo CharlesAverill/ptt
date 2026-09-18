@@ -1,0 +1,7 @@
+(lang dune 3.21)
+(using menhir 3.0)
+(using dune_site 0.1)
+
+(package
+  (name tcons)
+  (sites (lib stdlib)))

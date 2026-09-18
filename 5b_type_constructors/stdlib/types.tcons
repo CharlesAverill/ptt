@@ -1,0 +1,88 @@
+(* Product types *)
+
+type 'prod = \'Y:*.\'Z:*.forall 'X. ('Y -> 'Z -> 'X) -> 'X;;
+
+def pair : forall 'y:*. forall 'z:*. 'y -> 'z -> 'prod 'y 'z =
+    /\'y./\'z.\fst:'y.\snd:'z./\'x.\f:('y -> 'z -> 'x). f fst snd;;
+
+def fst : forall 'y:*. forall 'z:*. 'prod 'y 'z -> 'y =
+    /\'y./\'z.\p:'prod 'y 'z.p ['y] (\a:'y.\b:'z.a);;
+
+def snd : forall 'y:*. forall 'z:*. 'prod 'y 'z -> 'z =
+    /\'y./\'z.\p:'prod 'y 'z.p ['z] (\a:'y.\b:'z.b);;
+
+(* Sum types *)
+
+type 'sum = \'Y:*.\'Z:*.forall 'X. ('Y -> 'X) -> ('Z -> 'X) -> 'X;;
+
+def inl : forall 'y:*. forall 'z:*. 'y -> 'sum 'y 'z =
+    /\'y./\'z.\left:'y./\'x.\f:('y -> 'x).\g:('z -> 'x). f left;;
+
+def inr : forall 'y:*. forall 'z:*. 'z -> 'sum 'y 'z =
+    /\'y./\'z.\right:'z./\'x.\f:('y -> 'x).\g:('z -> 'x). g right;;
+
+def case : forall 'y:*. forall 'z:*. forall 'x:*. 'sum 'y 'z -> ('y -> 'x) -> ('z -> 'x) -> 'x =
+    /\'y./\'z./\'x.\s:'sum 'y 'z.\f:('y -> 'x).\g:('z -> 'x). s ['x] f g;;
+
+(* Options *)
+
+type 'option = \'T:*. 'sum unit 'T;;
+
+def none : forall 'T:*. 'option 'T = /\'T. inl [unit] ['T] ();;
+
+def some : forall 'T:*. 'T -> 'option 'T = /\'T.\x. inr [unit] ['T] x;;
+
+(* Higher-kind types *)
+
+type 'monad = \'m : * => *.
+  forall 'R:*.
+    ( (forall 'A:*. 'A -> 'm 'A) ->
+      (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B) ->
+      'R ) -> 'R;;
+
+(* build a dictionary from a return and a bind *)
+def mkMonad :
+  forall 'm : * => *.
+    (forall 'A:*. 'A -> 'm 'A) ->
+    (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B) ->
+    'monad 'm =
+  /\'m.
+  \ret : (forall 'A:*. 'A -> 'm 'A).
+  \bnd : (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B).
+  /\'R. \k : ((forall 'A:*. 'A -> 'm 'A) ->
+              (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B) ->
+              'R).
+    k ret bnd;;
+
+(* project return *)
+def getReturn :
+  forall 'm : * => *. 'monad 'm -> (forall 'A:*. 'A -> 'm 'A) =
+  /\'m. \d : 'monad 'm.
+    d [forall 'A:*. 'A -> 'm 'A]
+      (\r : (forall 'A:*. 'A -> 'm 'A).
+       \b : (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B). r);;
+
+(* project bind *)
+def getBind :
+  forall 'm : * => *. 'monad 'm ->
+    (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B) =
+  /\'m. \d : 'monad 'm.
+    d [forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B]
+      (\r : (forall 'A:*. 'A -> 'm 'A).
+       \b : (forall 'A:*. forall 'B:*. 'm 'A -> ('A -> 'm 'B) -> 'm 'B). b);;
+
+def optReturn : forall 'A:*. 'A -> 'option 'A =
+  /\'A. \x:'A. some ['A] x;;
+
+def optBind :
+  forall 'A:*. forall 'B:*. 'option 'A -> ('A -> 'option 'B) -> 'option 'B =
+  /\'A./\'B. \m : 'option 'A. \f : ('A -> 'option 'B).
+    case [unit] ['A] ['option 'B]
+      m
+      (\u:unit. none ['B])      (* None -> None *)
+      (\x:'A. f x);;            (* Some x -> f x *)
+
+def optionMonad : 'monad 'option =
+  mkMonad ['option] optReturn optBind;;
+
+type 'fix = \'f : * => *. forall 'X : *. (forall 'Self : *. ('Self -> 'f 'Self) -> 'X) -> 'X;;

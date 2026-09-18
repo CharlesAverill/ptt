@@ -1,0 +1,6 @@
+(install
+ (section
+  (site
+   (tcons stdlib)))
+ (files
+  (types.tcons as types.tcons)))

@@ -1,4 +1,4 @@
-(** Syntax definitions for the simply-typed lambda calculus *)
+(** Syntax definitions for the System F *)
 
 (** Types of [term]s *)
 type typ =

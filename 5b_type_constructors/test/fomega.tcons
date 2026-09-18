@@ -1,0 +1,6 @@
+(* Tests for System F omega: higher-kinded polymorphism via type constructors *)
+
+(/\'f. \x:'f nat. x) [\'g:*. 'g];;
+\h : (forall 'f:* => *. 'f nat -> 'f nat). h [\'g:*. 'g] 5;;
+def bad : forall 'a:*. 'a nat = ();;
+(/\'f. \x:'f nat. x : forall 'g:* => *. 'g nat -> 'g nat);;

@@ -1,0 +1,27 @@
+\x. x;;
+
+(\x. x) 5;;
+
+\x. x == 5;;
+
+(\x. x == 5) 3;;
+
+\f. f 5;;
+
+\f. \x. f x;;
+
+(\f. f 5) (\y. y == 5);;
+
+\x. if x then 5 else 6;;
+
+\x. x x;;
+
+(\x. x) (\y. y);;
+
+\f. \x. f (f x);;
+
+def id = \x. x;;
+
+id 5;;
+
+id true;;

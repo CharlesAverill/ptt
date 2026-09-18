@@ -10,7 +10,7 @@ The material is presented through successive iterations on an OCaml interpreter 
 ```
 opam init
 opam switch create ptt 5.3.0
-opam install dune menhir ocamlformat
+opam install dune dune-site menhir ocamlformat
 ```
 
 # Chapters

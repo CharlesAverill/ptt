@@ -1,4 +1,24 @@
-(** Syntax definitions for System F *)
+(** Syntax definitions for the System F omega *)
+
+(** Kinds of [typ]s *)
+type kind =
+  (* * *)
+  | KProper
+  (* * => * *)
+  | KOperator of (kind * kind)
+  (* Unification variables *)
+  | KMetaVar of int
+
+let letter i =
+  if i < 26 then String.make 1 (Char.chr (Char.code 'a' + i))
+  else Printf.sprintf "t%d" i
+
+let rec string_of_kind (k : kind) : string =
+  match k with
+  | KProper -> "*"
+  | KOperator (k1, k2) ->
+      Printf.sprintf "%s => %s" (string_of_kind k1) (string_of_kind k2)
+  | KMetaVar x -> Printf.sprintf "*%s" (letter x)
 
 (** Types of [term]s *)
 type typ =
@@ -8,10 +28,16 @@ type typ =
   | TNat
   (* Type variables *)
   | TVar of string
+  (* Unification variables *)
+  | TMetaVar of int
   (* Functions *)
   | TArrow of (typ * typ)
+  (* Polymorphic types *)
+  | TForall of (string * kind * typ)
   (* Type abstractions *)
-  | TForall of (string * typ)
+  | TLam of (string * kind * typ)
+  (* Applications of type abstractions *)
+  | TApp of (typ * typ)
 
 (** Convert a [typ] to a printable [string] *)
 let rec string_of_typ (t : typ) : string =
@@ -20,9 +46,15 @@ let rec string_of_typ (t : typ) : string =
   | TBool -> "bool"
   | TNat -> "nat"
   | TArrow (t1, t2) ->
-      Printf.sprintf "%s -> %s" (string_of_typ t1) (string_of_typ t2)
+      Printf.sprintf "(%s) -> (%s)" (string_of_typ t1) (string_of_typ t2)
   | TVar s -> s
-  | TForall (s, t) -> Printf.sprintf "forall %s.(%s)" s (string_of_typ t)
+  | TMetaVar x -> Printf.sprintf "?%s" (letter x)
+  | TForall (s, k, t) ->
+      Printf.sprintf "forall %s:%s.(%s)" s (string_of_kind k) (string_of_typ t)
+  | TLam (v, k, x) ->
+      Printf.sprintf "\\%s:%s.%s" v (string_of_kind k) (string_of_typ x)
+  | TApp (t1, t2) ->
+      Printf.sprintf "%s %s" (string_of_typ t1) (string_of_typ t2)
 
 (** Concrete syntax tree *)
 type sterm =
@@ -46,10 +78,30 @@ type sterm =
   | SApp of sterm * sterm
   (* e : T *)
   | SAnn of sterm * typ
-  (* /\'a.e *)
-  | STLam of (string * sterm)
+  (* /\'a[:k].e *)
+  | STLam of (string * kind option * sterm)
   (* e1 [t] *)
-  | SPolyApp of (sterm * typ option)
+  | SPolyApp of (sterm * typ)
+  (* let v [: t] = e1 in e2 *)
+  | SLet of (string * typ option * sterm * sterm)
+  (* (x, y) *)
+  | SPair of (sterm * sterm)
+  (* fst (x, y) *)
+  | SFst of sterm
+  (* snd (x, y) *)
+  | SSnd of sterm
+  (* inl x *)
+  | SInl of sterm
+  (* inr x *)
+  | SInr of sterm
+  (* match x with inl y -> e1 | inr z -> e2 *)
+  | SMatch of (sterm * string * sterm * string * sterm)
+  (* [] *)
+  | SNil
+  (* h :: t *)
+  | SCons of (sterm * sterm)
+  (* match l with [] -> e1 | h :: t -> e2 *)
+  | SListMatch of (sterm * sterm * string * string * sterm)
 
 (** Convert a [sterm] to a printable [string] *)
 let rec string_of_sterm (t : sterm) : string =
@@ -72,16 +124,40 @@ let rec string_of_sterm (t : sterm) : string =
       Printf.sprintf "%s %s" (string_of_sterm x1) (string_of_sterm x2)
   | SAnn (e, t) ->
       Printf.sprintf "(%s : %s)" (string_of_sterm e) (string_of_typ t)
-  | STLam (s, t) -> Printf.sprintf "/\\%s.(%s)" s (string_of_sterm t)
-  | SPolyApp (e, Some t) ->
+  | STLam (s, None, t) -> Printf.sprintf "/\\%s.(%s)" s (string_of_sterm t)
+  | STLam (s, Some k, t) ->
+      Printf.sprintf "/\\%s:%s.(%s)" s (string_of_kind k) (string_of_sterm t)
+  | SPolyApp (e, t) ->
       Printf.sprintf "%s [%s]" (string_of_sterm e) (string_of_typ t)
-  | SPolyApp (e, None) -> string_of_sterm e
+  | SLet (v, Some t, e1, e2) ->
+      Printf.sprintf "let %s : %s = %s in %s" v (string_of_typ t)
+        (string_of_sterm e1) (string_of_sterm e2)
+  | SLet (v, None, e1, e2) ->
+      Printf.sprintf "let %s = %s in %s" v (string_of_sterm e1)
+        (string_of_sterm e2)
+  | SPair (x, y) ->
+      Printf.sprintf "(%s, %s)" (string_of_sterm x) (string_of_sterm y)
+  | SFst x -> Printf.sprintf "fst %s" (string_of_sterm x)
+  | SSnd x -> Printf.sprintf "snd %s" (string_of_sterm x)
+  | SInl x -> Printf.sprintf "inl %s" (string_of_sterm x)
+  | SInr x -> Printf.sprintf "inr %s" (string_of_sterm x)
+  | SMatch (t, x, e1, y, e2) ->
+      Printf.sprintf "match %s with inl %s => %s | inr %s => %s end"
+        (string_of_sterm t) x (string_of_sterm e1) y (string_of_sterm e2)
+  | SNil -> "[]"
+  | SCons (h, t) ->
+      Printf.sprintf "%s :: %s" (string_of_sterm h) (string_of_sterm t)
+  | SListMatch (l, e1, h, t, e2) ->
+      Printf.sprintf "match %s with [] => %s | %s :: %s => %s end"
+        (string_of_sterm l) (string_of_sterm e1) h t (string_of_sterm e2)
 
 (** Top-level concrete syntax trees *)
 type sphrase =
   | SPTerm of sterm
   (* def x [: T] = e *)
   | SPDef of string * typ option * sterm
+  (* type x = t *)
+  | SPTypedef of string * typ
 
 (** Printable string form of [sphrase] *)
 let string_of_sphrase (s : sphrase) : string =
@@ -91,6 +167,7 @@ let string_of_sphrase (s : sphrase) : string =
       Printf.sprintf "def %s%s = %s" x
         (match ty with None -> "" | Some t -> " : " ^ string_of_typ t)
         (string_of_sterm e)
+  | SPTypedef (x, t) -> Printf.sprintf "type %s = %s" x (string_of_typ t)
 
 (** Syntax tree after type erasure *)
 type term =
@@ -183,19 +260,28 @@ let rec cas (t : term) (s : string) (t' : term) : term =
 let rec tfree (t : typ) : string list =
   match t with
   | TVar x -> [ x ]
+  | TMetaVar _ -> []
   | TUnit | TBool | TNat -> []
-  | TForall (v, x) -> List.filter (fun v' -> v <> v') (tfree x)
-  | TArrow (t1, t2) -> tfree t1 @ tfree t2
+  | TForall (v, k, x) -> List.filter (fun v' -> v <> v') (tfree x)
+  | TLam (v, k, x) -> List.filter (fun v' -> v <> v') (tfree x)
+  | TArrow (t1, t2) | TApp (t1, t2) -> tfree t1 @ tfree t2
 
 (** Type-level capture avoiding substitution *)
 let rec tcas (t : typ) (s : string) (t' : typ) : typ =
   match t with
-  | TUnit | TBool | TNat -> t
+  | TUnit | TBool | TNat | TMetaVar _ -> t
   | TVar v -> if v <> s then t else t'
   | TArrow (t1, t2) -> TArrow (tcas t1 s t', tcas t2 s t')
-  | TForall (v, x) ->
+  | TForall (v, k, x) ->
       if v = s then t
-      else if not (List.mem v (tfree t')) then TForall (v, tcas x s t')
+      else if not (List.mem v (tfree t')) then TForall (v, k, tcas x s t')
       else
         let v' = fresh v ((s :: tfree t') @ tfree x) in
-        TForall (v', tcas (tcas x v (TVar v')) s t')
+        TForall (v', k, tcas (tcas x v (TVar v')) s t')
+  | TLam (v, k, x) ->
+      if v = s then t
+      else if not (List.mem v (tfree t')) then TLam (v, k, tcas x s t')
+      else
+        let v' = fresh v ((s :: tfree t') @ tfree x) in
+        TLam (v', k, tcas (tcas x v (TVar v')) s t')
+  | TApp (t1, t2) -> TApp (tcas t1 s t', tcas t2 s t')

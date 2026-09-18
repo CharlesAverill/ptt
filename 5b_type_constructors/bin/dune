@@ -1,0 +1,8 @@
+(executable
+ (public_name tcons)
+ (name main)
+ (libraries ptt dune-site unix))
+
+(generate_sites_module
+ (module pttlib)
+ (sites tcons))

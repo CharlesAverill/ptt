@@ -1,0 +1,17 @@
+\x:unit.
+  x;;
+
+(\x:unit->unit.x) (\y.y);;
+
+(* a (* nested *) comment *)
+\x:unit.\y:unit.x;;
+\x:unit.x;;
+);;
+\y:unit.y;;
+def x : nat = 5;;
+
+def inc : nat -> bool = \y. y == x;;
+
+x;;
+
+inc 5;;
