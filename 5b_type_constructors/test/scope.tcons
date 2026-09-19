@@ -1,0 +1,21 @@
+(* Type variables must not escape their scope *)
+
+(* would let us coerce any value to any type *)
+def coerce = \y. /\'a. (y : 'a);;
+\y. /\'a. \x:'a. (y : 'a);;
+\y. (/\'a. \x:'a. y : forall 'b. 'b -> 'b);;
+let f = /\'a. \x. x in /\'a. \y:'a. f [nat] y;;
+
+(* ...but metavariables created inside the scope may mention it *)
+(/\'a. \x. x : forall 'b. 'b -> 'b);;
+(/\'a. \x. (x : 'a)) [nat] 5;;
+
+(* shadowing keeps the two variables apart *)
+/\'a. \y:'a. /\'a. \z:'a. y;;
+(/\'a. \y:'a. /\'a. \z:'a. y) [nat] 5 [bool] true;;
+(/\'a. \y:'a. /\'a. (y : 'a)) [nat] 5 [bool];;
+
+(* bound type variables shadow aliases *)
+type 'x = nat;;
+(/\'x. \v:'x. v) [bool] true;;
+(\v:(forall 'x. 'x -> 'x). v [bool] true) (/\'q. \z:'q. z);;

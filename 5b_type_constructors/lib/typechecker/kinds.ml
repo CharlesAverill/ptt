@@ -4,106 +4,128 @@ open Syntax
 open Monads
 open Defs
 
-module C = Counter (struct
-  type v = kind
+(** Generate a fresh kind metavariable *)
+let fresh_kmetavar (st : state) : kind * state =
+  let n, st = fresh_id st in
+  (KMetaVar n, st)
 
-  let f x = KMetaVar x
-end)
+(** The kind of a type-level binder *)
+let binder_kind (st : state) (k : kind option) : kind * state =
+  match k with Some k -> (k, st) | None -> fresh_kmetavar st
 
-(** Generate fresh kind metavariables
-
-    This function is monotonic and will never return a duplicate kind
-    metavariable within a session *)
-let fresh_kmetavar = C.fresh
-
-(** Reset the kind metavariable counter, e.g. at the start of a new typechecking
-    session *)
-let reset_kmetavar_counter = C.reset
-
-let rec get_kind_constraints (g : typctx) (t : typ) :
-    (kind * kind constr_set, string) result =
-  match t with
-  | TUnit | TBool | TNat -> return (KProper, [])
-  | TVar v -> (
-      match lookup_alias g v with
-      | None -> (
-          match lookup_tyvar g v with
-          | None -> fail (Printf.sprintf "Couldn't determine kind of %s" v)
-          | Some k -> return (k, []))
-      | Some t -> get_kind_constraints g t)
-  (* TODO: every [TMetaVar] currently gets kind [KProper] unconditionally,
-     which is correct today since one is only ever minted for the type of a
-     term (always kind [*]). If a metavariable can ever get solved to a type
-     operator (e.g. [?f := list]), it needs its own fresh kind metavariable
-     tracked per metavariable id instead *)
-  | TMetaVar _ -> return (KProper, [])
-  | TArrow (t1, t2) ->
-      let* k1, c1 = get_kind_constraints g t1 in
-      let* k2, c2 = get_kind_constraints g t2 in
-      return (KProper, c1 @ c2 @ [ (k1, KProper); (k2, KProper) ])
-  | TLam (v, k1, t) ->
-      let* k2, c = get_kind_constraints (update_tyvar g v k1) t in
-      return (KOperator (k1, k2), c)
-  | TApp (t1, t2) ->
-      let* k1, c1 = get_kind_constraints g t1 in
-      let* k2, c2 = get_kind_constraints g t2 in
-      let k3 = fresh_kmetavar () in
-      return (k3, c1 @ c2 @ [ (k1, KOperator (k2, k3)) ])
-  | TForall (v, k, t) ->
-      let* k', c = get_kind_constraints (update_tyvar g v k) t in
-      return (KProper, c @ [ (k', KProper) ])
-
-(** Perform the kind substitution s(t) *)
-let rec kind_subst (s : kind subst) (k : kind) : kind =
+(** Apply a kind substitution to a kind *)
+let rec kzonk (s : kind subst) (k : kind) : kind =
   match k with
   | KProper -> KProper
-  | KOperator (k1, k2) -> KOperator (kind_subst s k1, kind_subst s k2)
+  | KOperator (k1, k2) -> KOperator (kzonk s k1, kzonk s k2)
   | KMetaVar x -> (
-      match lookup_subst s x with Some k -> k | None -> KMetaVar x)
-
-let rec kinds_eq (k1 : kind) (k2 : kind) : bool =
-  match (k1, k2) with
-  | KProper, KProper -> true
-  | KOperator (ka, kb), KOperator (kc, kd) -> kinds_eq ka kc && kinds_eq kb kd
-  | KMetaVar x, KMetaVar y -> x = y
-  | _, _ -> false
+      match lookup_subst s x with Some k' -> kzonk s k' | None -> k)
 
 (** Whether a kind metavariable [x] occurs in a kind [k] *)
 let rec occurs (x : int) (k : kind) : bool =
   match k with
-  | KMetaVar x' when x = x' -> true
+  | KMetaVar x' -> x = x'
   | KOperator (k1, k2) -> occurs x k1 || occurs x k2
-  | _ -> false
+  | KProper -> false
 
-let compose = compose kind_subst
-let constr_subst = constr_subst kind_subst
+(** Unify two kinds, extending the kind substitution of [st] *)
+let rec kunify (st : state) (k1 : kind) (k2 : kind) : (state, string) result =
+  match (kzonk st.ksubst k1, kzonk st.ksubst k2) with
+  | KProper, KProper -> return st
+  | KMetaVar x, KMetaVar y when x = y -> return st
+  | KMetaVar x, k | k, KMetaVar x ->
+      if occurs x k then
+        fail
+          (Printf.sprintf "Infinite kind: %s occurs in %s"
+             (string_of_kind (KMetaVar x))
+             (string_of_kind k))
+      else return { st with ksubst = (x, k) :: st.ksubst }
+  | KOperator (a1, b1), KOperator (a2, b2) ->
+      let* st = kunify st a1 a2 in
+      kunify st b1 b2
+  | k1, k2 ->
+      fail
+        (Printf.sprintf "Kind unification failure, %s <> %s" (string_of_kind k1)
+           (string_of_kind k2))
 
-(** Generate a solution to a set of kind constraints through unification *)
-let rec unify (c : kind constr_set) : (kind subst, string) result =
-  match c with
-  | [] -> return []
-  | (s, t) :: c' -> (
-      if kinds_eq s t then unify c'
-      else
-        match (s, t) with
-        | KMetaVar x, _ when not (occurs x t) ->
-            let* c'' = unify (constr_subst [ (x, t) ] c') in
-            return (compose c'' [ (x, t) ])
-        | _, KMetaVar x when not (occurs x s) ->
-            let* c'' = unify (constr_subst [ (x, s) ] c') in
-            return (compose c'' [ (x, s) ])
-        | KOperator (s1, s2), KOperator (t1, t2) ->
-            unify (c' @ [ (s1, t1); (s2, t2) ])
-        | s, t ->
-            fail
-              (Printf.sprintf "Kind unification failure, %s <> %s"
-                 (string_of_kind s) (string_of_kind t)))
+(** Apply a kind substitution to a kind, defaulting every metavariable that is
+    still unsolved to [*] *)
+let rec kdefault (s : kind subst) (k : kind) : kind =
+  match kzonk s k with
+  | KMetaVar _ -> KProper
+  | KOperator (k1, k2) -> KOperator (kdefault s k1, kdefault s k2)
+  | KProper -> KProper
 
-(** Apply a kind substitution to the kind annotations embedded in a [typ] *)
-let rec kind_subst_typ (s : kind subst) (t : typ) : typ =
+(** Map [f] over kind annotations in [t] *)
+let rec map_kinds (f : kind -> kind) (t : typ) : typ =
   match t with
   | TUnit | TBool | TNat | TVar _ | TMetaVar _ -> t
-  | TArrow (t1, t2) -> TArrow (kind_subst_typ s t1, kind_subst_typ s t2)
-  | TApp (t1, t2) -> TApp (kind_subst_typ s t1, kind_subst_typ s t2)
-  | TForall (v, k, t') -> TForall (v, kind_subst s k, kind_subst_typ s t')
-  | TLam (v, k, t') -> TLam (v, kind_subst s k, kind_subst_typ s t')
+  | TArrow (t1, t2) -> TArrow (map_kinds f t1, map_kinds f t2)
+  | TApp (t1, t2) -> TApp (map_kinds f t1, map_kinds f t2)
+  | TForall (v, k, t') -> TForall (v, Option.map f k, map_kinds f t')
+  | TLam (v, k, t') -> TLam (v, Option.map f k, map_kinds f t')
+
+(** Choose the internal name for a new type variable binder written as [v] *)
+let fresh_tyvar_name ?(avoid = []) (g : typctx) (v : string) : string =
+  let taken =
+    avoid @ List.map (fun (_, (v', _)) -> v') g.tyvars @ List.map fst g.aliases
+  in
+  fresh v taken
+
+(** Kind-check a type [t] written by the user, under [g] *)
+let rec check_type (st : state) (g : typctx) (t : typ) :
+    (typ * kind * state, string) result =
+  match t with
+  (* K-Prim *)
+  | TUnit | TBool | TNat -> return (t, KProper, st)
+  (* Metavariables only ever stand in for the types of terms *)
+  | TMetaVar _ -> return (t, KProper, st)
+  (* K-Var *)
+  | TVar v -> (
+      match lookup_tyvar g v with
+      | Some (v', k) -> return (TVar v', k, st)
+      | None -> (
+          match lookup_alias g v with
+          | Some (_, k) -> return (t, k, st)
+          | None -> fail (Printf.sprintf "Unbound type variable %s" v)))
+  (* K-Arrow *)
+  | TArrow (t1, t2) ->
+      let* t1', k1, st = check_type st g t1 in
+      let* st = kunify st k1 KProper in
+      let* t2', k2, st = check_type st g t2 in
+      let* st = kunify st k2 KProper in
+      return (TArrow (t1', t2'), KProper, st)
+  (* K-App *)
+  | TApp (t1, t2) ->
+      let* t1', k1, st = check_type st g t1 in
+      let* t2', k2, st = check_type st g t2 in
+      let k3, st = fresh_kmetavar st in
+      let* st = kunify st k1 (KOperator (k2, k3)) in
+      return (TApp (t1', t2'), k3, st)
+  (* K-All *)
+  | TForall (v, k, body) ->
+      let k, st = binder_kind st k in
+      let v' = fresh_tyvar_name g v in
+      let* body', kb, st = check_type st (update_tyvar g v v' k) body in
+      let* st = kunify st kb KProper in
+      return (TForall (v', Some k, body'), KProper, st)
+  (* K-Abs *)
+  | TLam (v, k, body) ->
+      let k, st = binder_kind st k in
+      let v' = fresh_tyvar_name g v in
+      let* body', kb, st = check_type st (update_tyvar g v v' k) body in
+      return (TLam (v', Some k, body'), KOperator (k, kb), st)
+
+(** Kind-check a type [t] written by the user that must classify terms, i.e.
+    must have kind [*] *)
+let check_proper_type (st : state) (g : typctx) (t : typ) :
+    (typ * state, string) result =
+  let* t', k, st = check_type st g t in
+  match kunify st k KProper with
+  | Ok st -> return (t', st)
+  | Error _ ->
+      fail
+        (Printf.sprintf
+           "%s has kind %s, but only types of kind * can classify terms"
+           (string_of_typ t)
+           (string_of_kind (kzonk st.ksubst k)))

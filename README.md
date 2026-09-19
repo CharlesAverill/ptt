@@ -19,7 +19,11 @@ opam install dune dune-site menhir ocamlformat
 1. [Simply-Typed Lambda Calculus](./1_stlc) - a simple type system to the lambda calculus
 2. [Bidirectional Typing](./2_bt) - a precursor to robust type inference
 3. [Parametric Polymorphism](./3_poly) - System F and unification-based type inference
-4. [Hindley-Milner Type Inference](./4_hm) - robust type inference for large inter-dependent programs
-5. [Type operators](./5_ops) - template types/metaprogramming
+4. Type inference
+    1. [Unification](./4a_unification) - solving type constraints
+    2. [Hindley-Milner Type Inference](./4b_hm) - robust type inference for large inter-dependent programs
+5. Richer types
+    1. [Extensions](./5a_extensions) - products, sums and lists
+    2. [Type Constructors](./5b_type_constructors) - System F omega: type operators and kinds
 6. [Recursive types](./6_rt) - type definitions in the style of OCaml
 7. [Dependent types](./7_dt) - types dependent on values

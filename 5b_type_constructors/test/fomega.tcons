@@ -1,6 +1,14 @@
 (* Tests for System F omega: higher-kinded polymorphism via type constructors *)
 
-(/\'f. \x:'f nat. x) [\'g:*. 'g];;
-\h : (forall 'f:* => *. 'f nat -> 'f nat). h [\'g:*. 'g] 5;;
-def bad : forall 'a:*. 'a nat = ();;
-(/\'f. \x:'f nat. x : forall 'g:* => *. 'g nat -> 'g nat);;
+(/\'f. \x:'f nat. x) [\'g. 'g];;
+\h : (forall 'f. 'f nat -> 'f nat). h [\'g. 'g] 5;;
+def bad : forall 'a. 'a nat = ();;
+(/\'f. \x:'f nat. x : forall 'g. 'g nat -> 'g nat);;
+(* kinds of binders are inferred, including higher-order ones *)
+/\'f. \x:'f (\'a. 'a). x;;
+/\'f. \x:'f ('f nat). x;;
+(* unused binders default to kind * and still match annotations *)
+(/\'a. \x:nat. x : forall 'b. nat -> nat);;
+(* ill-kinded types are rejected before they are ever normalized *)
+((/\'b. ()) : (\'a. 'a 'a) (\'a. 'a 'a)) [nat];;
+(\x:(\'a. 'a). x);;

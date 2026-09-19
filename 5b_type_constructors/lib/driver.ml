@@ -23,8 +23,6 @@ let parse_sterm (s : string) : sterm =
 (** Parse and typecheck a [string] from an empty context into a type-erased
     [term] *)
 let parse (s : string) : typed_term =
-  reset_metavar_counter ();
-  Typechecker.Kinds.reset_kmetavar_counter ();
   match typecheck empty_typctx (parse_sterm s) with
   | Ok t -> t
   | Error s -> raise (TypeError s)
@@ -109,13 +107,10 @@ let run_prelude_files (filenames : string list) : typctx * (string * term) list
         close_in fd;
 
         let lexbuf = Lexing.from_string content in
-        (* Run your exact loop silently (empty prompt function) *)
         loop lexbuf (fun () -> ()) acc_gamma acc_defs)
     (empty_typctx, []) filenames
 
 let init (prelude_paths : string list) fd =
-  reset_metavar_counter ();
-  Typechecker.Kinds.reset_kmetavar_counter ();
   let init_gamma, init_defs = run_prelude_files prelude_paths in
   (init_gamma, init_defs, Lexing.from_channel fd)
 

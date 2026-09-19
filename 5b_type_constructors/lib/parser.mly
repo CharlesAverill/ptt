@@ -8,7 +8,6 @@ open Monads
 %token <string> IDENT
 %token <string> TYPE_IDENT
 %token DOT
-%token COMMA
 // brackets
 %token LPAREN
 %token RPAREN
@@ -30,20 +29,6 @@ open Monads
 %token ISEQ
 %token LET
 %token IN
-%token FST
-%token SND
-%token INL
-%token INR
-%token NIL
-%token CONS
-%token MATCH
-%token WITH
-%token VERT
-%token BIGARROW
-%token END
-%token LIST
-%token STAR
-%token PLUS
 %token BINDER
 // top-level definitions
 %token EQ
@@ -56,7 +41,6 @@ open Monads
 // precedences
 %nonassoc BINDER
 %nonassoc ISEQ
-%right CONS
 
 %start <(Syntax.sterm, string) result> menhir_parse
 %start <(Syntax.sphrase option, string) result> menhir_parse_phrase
@@ -83,9 +67,7 @@ term:
   | LAMBDA; id = IDENT; DOT; t = term
       { let* t' = t in return (SLam (id, None, t')) } %prec BINDER
   | BIGLAM; id = TYPE_IDENT; DOT; t = term
-      { let* t' = t in return (STLam (id, None, t')) } %prec BINDER
-  | BIGLAM; id = TYPE_IDENT; COLON; k = kind; DOT; t = term
-      { let* t' = t in return (STLam (id, Some k, t')) } %prec BINDER
+      { let* t' = t in return (STLam (id, t')) } %prec BINDER
   | IF; b = term; THEN; c1 = term; ELSE; c2 = term
       { let* b' = b in
         let* c1' = c1 in
@@ -99,30 +81,14 @@ term:
       { let* t1' = t1 in
         let* t2' = t2 in
         return (SLet (id, Some ty, t1', t2')) } %prec BINDER
-  | MATCH; x = app; WITH;
-      INL; y = IDENT; BIGARROW; e1 = term; VERT;
-      INR; z = IDENT; BIGARROW; e2 = term; END
-      { let* x' = x in let* e1' = e1 in let* e2' = e2 in
-        return (SMatch (x', y, e1', z, e2')) }
-  | MATCH; x = app; WITH;
-      NIL; BIGARROW; e1 = term; VERT;
-      h = IDENT; CONS; t = IDENT; BIGARROW; e2 = term; END
-      { let* x' = x in let* e1' = e1 in let* e2' = e2 in
-        return (SListMatch (x', e1', h, t, e2')) }
   | a = term; ISEQ; b = term
       { let* a' = a in
         let* b' = b in
         return (SIseq (a', b')) } %prec ISEQ
-  | a = term; CONS; b = term
-      { let* a' = a in let* b' = b in return (SCons (a', b')) } %prec CONS
   | a = app
       { a }
 
 app:
-  | FST; a = atom   { let* a' = a in return (SFst a') }
-  | SND; a = atom   { let* a' = a in return (SSnd a') }
-  | INL; a = atom   { let* a' = a in return (SInl a') }
-  | INR; a = atom   { let* a' = a in return (SInr a') }
   | a = app; LBRACE; ty = typ; RBRACE
       { let* a' = a in return (SPolyApp (a', ty)) }
   | a = app; at = atom
@@ -136,11 +102,8 @@ atom:
   | TRUE                     { return STrue }
   | FALSE                    { return SFalse }
   | n = INT                  { return (SNat n) }
-  | NIL                      { return SNil }
   | LPAREN; t = term; COLON; ty = typ; RPAREN
                              { let* t' = t in return (SAnn (t', ty)) }
-  | LPAREN; t1 = term; COMMA; t2 = term; RPAREN
-      { let* t1' = t1 in let* t2' = t2 in return (SPair (t1', t2')) }
   | LPAREN; t = term; RPAREN { t }
 
 typ:
@@ -150,13 +113,9 @@ typArrow:
   | t1 = typApp; ARROW; t2 = typArrow
                             { TArrow (t1, t2) }
   | FORALL; id = TYPE_IDENT; DOT; t = typArrow
-                            (* an omitted kind defaults to [*], matching
-                               plain (non-type-operator) System F foralls *)
-                            { TForall (id, KProper, t) }
-  | FORALL; id = TYPE_IDENT; COLON; k = kind; DOT; t = typArrow
-                            { TForall (id, k, t) }
-  | LAMBDA; id = TYPE_IDENT; COLON; k = kind; DOT; t = typArrow
-                            { TLam (id, k, t) }
+                            { TForall (id, None, t) }
+  | LAMBDA; id = TYPE_IDENT; DOT; t = typArrow
+                            { TLam (id, None, t) }
   | t = typApp               { t }
 
 typApp:
@@ -170,12 +129,3 @@ typAtom:
   | NAT                      { TNat }
   | id = TYPE_IDENT          { TVar id }
   | LPAREN; t = typ; RPAREN  { t }
-
-kind:
-  | k = kindAtom             { k }
-  | k1 = kindAtom; BIGARROW; k2 = kind
-                             { KOperator (k1, k2) }
-
-kindAtom:
-  | STAR                     { KProper }
-  | LPAREN; k = kind; RPAREN { k }

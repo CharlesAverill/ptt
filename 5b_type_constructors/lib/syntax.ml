@@ -1,5 +1,7 @@
 (** Syntax definitions for the System F omega *)
 
+open Utils
+
 (** Kinds of [typ]s *)
 type kind =
   (* * *)
@@ -17,8 +19,8 @@ let rec string_of_kind (k : kind) : string =
   match k with
   | KProper -> "*"
   | KOperator (k1, k2) ->
-      Printf.sprintf "%s => %s" (string_of_kind k1) (string_of_kind k2)
-  | KMetaVar x -> Printf.sprintf "*%s" (letter x)
+      Printf.sprintf "%s => %s" (paren (string_of_kind k1)) (string_of_kind k2)
+  | KMetaVar x -> Printf.sprintf "?k%d" x
 
 (** Types of [term]s *)
 type typ =
@@ -33,11 +35,14 @@ type typ =
   (* Functions *)
   | TArrow of (typ * typ)
   (* Polymorphic types *)
-  | TForall of (string * kind * typ)
+  | TForall of (string * kind option * typ)
   (* Type abstractions *)
-  | TLam of (string * kind * typ)
+  | TLam of (string * kind option * typ)
   (* Applications of type abstractions *)
   | TApp of (typ * typ)
+
+let string_of_binder (v : string) (k : kind option) : string =
+  match k with None -> v | Some k -> v ^ ":" ^ string_of_kind k
 
 (** Convert a [typ] to a printable [string] *)
 let rec string_of_typ (t : typ) : string =
@@ -46,15 +51,17 @@ let rec string_of_typ (t : typ) : string =
   | TBool -> "bool"
   | TNat -> "nat"
   | TArrow (t1, t2) ->
-      Printf.sprintf "(%s) -> (%s)" (string_of_typ t1) (string_of_typ t2)
+      Printf.sprintf "%s -> %s" (paren (string_of_typ t1)) (string_of_typ t2)
   | TVar s -> s
   | TMetaVar x -> Printf.sprintf "?%s" (letter x)
-  | TForall (s, k, t) ->
-      Printf.sprintf "forall %s:%s.(%s)" s (string_of_kind k) (string_of_typ t)
-  | TLam (v, k, x) ->
-      Printf.sprintf "\\%s:%s.%s" v (string_of_kind k) (string_of_typ x)
+  | TForall (v, k, t') ->
+      Printf.sprintf "forall %s. %s" (string_of_binder v k) (string_of_typ t')
+  | TLam (v, k, t') ->
+      Printf.sprintf "\\%s. %s" (string_of_binder v k) (string_of_typ t')
   | TApp (t1, t2) ->
-      Printf.sprintf "%s %s" (string_of_typ t1) (string_of_typ t2)
+      Printf.sprintf "%s %s"
+        (paren (string_of_typ t1))
+        (paren (string_of_typ t2))
 
 (** Concrete syntax tree *)
 type sterm =
@@ -78,30 +85,12 @@ type sterm =
   | SApp of sterm * sterm
   (* e : T *)
   | SAnn of sterm * typ
-  (* /\'a[:k].e *)
-  | STLam of (string * kind option * sterm)
+  (* /\'a.e *)
+  | STLam of (string * sterm)
   (* e1 [t] *)
   | SPolyApp of (sterm * typ)
   (* let v [: t] = e1 in e2 *)
   | SLet of (string * typ option * sterm * sterm)
-  (* (x, y) *)
-  | SPair of (sterm * sterm)
-  (* fst (x, y) *)
-  | SFst of sterm
-  (* snd (x, y) *)
-  | SSnd of sterm
-  (* inl x *)
-  | SInl of sterm
-  (* inr x *)
-  | SInr of sterm
-  (* match x with inl y -> e1 | inr z -> e2 *)
-  | SMatch of (sterm * string * sterm * string * sterm)
-  (* [] *)
-  | SNil
-  (* h :: t *)
-  | SCons of (sterm * sterm)
-  (* match l with [] -> e1 | h :: t -> e2 *)
-  | SListMatch of (sterm * sterm * string * string * sterm)
 
 (** Convert a [sterm] to a printable [string] *)
 let rec string_of_sterm (t : sterm) : string =
@@ -110,46 +99,32 @@ let rec string_of_sterm (t : sterm) : string =
   | SUnit -> "()"
   | STrue -> "true"
   | SFalse -> "false"
+  | SNat n -> string_of_int n
   | SIfthenelse (x, y, z) ->
       Printf.sprintf "if %s then %s else %s" (string_of_sterm x)
         (string_of_sterm y) (string_of_sterm z)
-  | SNat n -> string_of_int n
   | SIseq (n, m) ->
-      Printf.sprintf "%s == %s" (string_of_sterm n) (string_of_sterm m)
-  | SLam (v, ty, x) ->
-      Printf.sprintf "\\%s%s.(%s)" v
-        (match ty with None -> "" | Some t -> ":" ^ string_of_typ t)
-        (string_of_sterm x)
+      Printf.sprintf "%s == %s"
+        (paren (string_of_sterm n))
+        (paren (string_of_sterm m))
+  | SLam (v, None, x) -> Printf.sprintf "\\%s. %s" v (string_of_sterm x)
+  | SLam (v, Some ty, x) ->
+      Printf.sprintf "\\%s:%s. %s" v (string_of_typ ty) (string_of_sterm x)
   | SApp (x1, x2) ->
-      Printf.sprintf "%s %s" (string_of_sterm x1) (string_of_sterm x2)
-  | SAnn (e, t) ->
-      Printf.sprintf "(%s : %s)" (string_of_sterm e) (string_of_typ t)
-  | STLam (s, None, t) -> Printf.sprintf "/\\%s.(%s)" s (string_of_sterm t)
-  | STLam (s, Some k, t) ->
-      Printf.sprintf "/\\%s:%s.(%s)" s (string_of_kind k) (string_of_sterm t)
-  | SPolyApp (e, t) ->
-      Printf.sprintf "%s [%s]" (string_of_sterm e) (string_of_typ t)
-  | SLet (v, Some t, e1, e2) ->
-      Printf.sprintf "let %s : %s = %s in %s" v (string_of_typ t)
-        (string_of_sterm e1) (string_of_sterm e2)
+      Printf.sprintf "%s %s"
+        (paren (string_of_sterm x1))
+        (paren (string_of_sterm x2))
+  | SAnn (e, ty) ->
+      Printf.sprintf "(%s : %s)" (string_of_sterm e) (string_of_typ ty)
+  | STLam (v, x) -> Printf.sprintf "/\\%s. %s" v (string_of_sterm x)
+  | SPolyApp (e, ty) ->
+      Printf.sprintf "%s [%s]" (paren (string_of_sterm e)) (string_of_typ ty)
   | SLet (v, None, e1, e2) ->
       Printf.sprintf "let %s = %s in %s" v (string_of_sterm e1)
         (string_of_sterm e2)
-  | SPair (x, y) ->
-      Printf.sprintf "(%s, %s)" (string_of_sterm x) (string_of_sterm y)
-  | SFst x -> Printf.sprintf "fst %s" (string_of_sterm x)
-  | SSnd x -> Printf.sprintf "snd %s" (string_of_sterm x)
-  | SInl x -> Printf.sprintf "inl %s" (string_of_sterm x)
-  | SInr x -> Printf.sprintf "inr %s" (string_of_sterm x)
-  | SMatch (t, x, e1, y, e2) ->
-      Printf.sprintf "match %s with inl %s => %s | inr %s => %s end"
-        (string_of_sterm t) x (string_of_sterm e1) y (string_of_sterm e2)
-  | SNil -> "[]"
-  | SCons (h, t) ->
-      Printf.sprintf "%s :: %s" (string_of_sterm h) (string_of_sterm t)
-  | SListMatch (l, e1, h, t, e2) ->
-      Printf.sprintf "match %s with [] => %s | %s :: %s => %s end"
-        (string_of_sterm l) (string_of_sterm e1) h t (string_of_sterm e2)
+  | SLet (v, Some ty, e1, e2) ->
+      Printf.sprintf "let %s : %s = %s in %s" v (string_of_typ ty)
+        (string_of_sterm e1) (string_of_sterm e2)
 
 (** Top-level concrete syntax trees *)
 type sphrase =
@@ -200,15 +175,19 @@ let rec string_of_term (t : term) : string =
   | Unit -> "()"
   | True -> "true"
   | False -> "false"
+  | Nat n -> string_of_int n
   | Ifthenelse (x, y, z) ->
       Printf.sprintf "if %s then %s else %s" (string_of_term x)
         (string_of_term y) (string_of_term z)
   | Iseq (n, m) ->
-      Printf.sprintf "%s == %s" (string_of_term n) (string_of_term m)
-  | Nat n -> string_of_int n
-  | Lam (v, x) -> Printf.sprintf "\\%s.(%s)" v (string_of_term x)
+      Printf.sprintf "%s == %s"
+        (paren (string_of_term n))
+        (paren (string_of_term m))
+  | Lam (v, x) -> Printf.sprintf "\\%s. %s" v (string_of_term x)
   | App (x1, x2) ->
-      Printf.sprintf "%s %s" (string_of_term x1) (string_of_term x2)
+      Printf.sprintf "%s %s"
+        (paren (string_of_term x1))
+        (paren (string_of_term x2))
 
 (** Top-level type-free syntax trees *)
 type phrase = PTerm of term | PDef of string * term

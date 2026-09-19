@@ -1,4 +1,11 @@
 (test
  (name test_tcons)
  (libraries ptt unix)
- (deps sample.tcons systemf.tcons infer.tcons fomega.tcons))
+ (deps
+  sample.tcons
+  systemf.tcons
+  infer.tcons
+  fomega.tcons
+  scope.tcons
+  stdlib.tcons
+  ../stdlib/types.tcons))

@@ -1,0 +1,32 @@
+(* Using the standard library's encodings *)
+
+(* type application after term application needs no annotation *)
+getReturn ['option] optionMonad [nat] 5;;
+case [unit] [bool] [bool]
+  (getBind ['option] optionMonad [nat] [bool]
+    (some [nat] 5)
+    (\n:nat. some [bool] (n == 5)))
+  (\u:unit. false)
+  (\b:bool. b);;
+
+foldr [nat] [bool] (\n:nat. \acc:bool. if n == 2 then true else acc) false
+  (cons [nat] 1 (cons [nat] 2 (nil [nat])));;
+
+(* an abstract data type: a toggle whose state is hidden *)
+type 'toggleSig = \'S. 'prod 'S ('prod ('S -> 'S) ('S -> bool));;
+
+def toggle : 'exists 'toggleSig =
+  pack ['toggleSig] [bool]
+    (pair [bool] ['prod (bool -> bool) (bool -> bool)] false
+       (pair [bool -> bool] [bool -> bool] (\b:bool. if b then false else true) (\b:bool. b)));;
+
+(* flip once, then read *)
+unpack ['toggleSig] [bool] toggle
+  (/\'S. \t:'toggleSig 'S.
+    let init = fst ['S] ['prod ('S -> 'S) ('S -> bool)] t in
+    let ops = snd ['S] ['prod ('S -> 'S) ('S -> bool)] t in
+    snd ['S -> 'S] ['S -> bool] ops (fst ['S -> 'S] ['S -> bool] ops init));;
+
+(* clients can't depend on the representation type *)
+unpack ['toggleSig] [bool] toggle
+  (/\'S. \t:'toggleSig 'S. (fst ['S] ['prod ('S -> 'S) ('S -> bool)] t : bool));;

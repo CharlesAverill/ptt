@@ -16,7 +16,7 @@ let newline = '\r' | '\n' | "\r\n"
 let id = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 let type_id = '\'' id+
 let digit = ['0'-'9']
-let num = ['1'-'9'] digit*
+let num = '0' | ['1'-'9'] digit*
 
 rule read =
   parse
@@ -37,10 +37,6 @@ rule read =
   | "let"           { LET }
   | "in"            { IN }
   | "forall"        { FORALL }
-  | "match"         { MATCH }
-  | "with"          { WITH }
-  | "end"           { END }
-  | "list"          { LIST }
   | "/\\"           { BIGLAM }
   | "=="            { ISEQ }
   | "="             { EQ }
@@ -50,19 +46,12 @@ rule read =
   | num             { INT (int_of_string (Lexing.lexeme lexbuf)) }
   | ";;"            { DSEMI }
   | "."             { DOT }
-  | ","             { COMMA }
-  | "*"             { STAR }
-  | "+"             { PLUS }
   | ":"             { COLON }
   | "->"            { ARROW }
   | "("             { LPAREN }
   | ")"             { RPAREN }
   | "["             { LBRACE }
   | "]"             { RBRACE }
-  | "[]"            { NIL }
-  | "::"            { CONS }
-  | "|"             { VERT }
-  | "=>"            { BIGARROW }
   | eof             { EOF }
   | _ as c          { raise (SyntaxError (Printf.sprintf "unexpected character: %c" c)) }
 
