@@ -5,13 +5,9 @@ This repo contains course materials for PTT, a reading course on introductory ty
 This course is primarily interested in **type checkers** and will not include treatments of other aspects of language design like evaluation strategies, parsing, optimization, etc.
 The material is presented through successive iterations on an OCaml interpreter for the lambda calculus.
 
-# opam Setup
+# Setup
 
-```
-opam init
-opam switch create ptt 5.3.0
-opam install dune dune-site menhir ocamlformat
-```
+Install [opam](https://opam.ocaml.org/) and then run `make opam`.
 
 # Chapters
 
