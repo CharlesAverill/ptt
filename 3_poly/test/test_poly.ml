@@ -323,7 +323,25 @@ let () =
     | _, ty -> Ok ty
     | exception TypeError m -> Error m);
   check "e2e: free tyvar instantiation rejected" true
-    (typecheck_fails "(/\\'a. ())['b]")
+    (typecheck_fails "(/\\'a. ())['b]");
+  check "e2e: literals synthesize" (TNat, TUnit)
+    (snd (parse "5"), snd (parse "()"));
+  check "e2e: unannotated lambda checks against a forall" true
+    (not (typecheck_fails "(/\\'a. \\x. x : forall 'b. 'b -> 'b)"));
+  check "e2e: unannotated lambda under a tlam can't synthesize" true
+    (typecheck_fails "/\\'a. \\x. x");
+  (* Shadowing a type variable must not capture the outer one, or we could
+     coerce any value to any type *)
+  check "e2e: renaming in the tlam check rule does not capture" true
+    (typecheck_fails
+       "/\\'a. \\y:'a. ((/\\'a. \\x:'a. x : forall 'b. 'a -> 'b) [nat] y)");
+  check "e2e: shadowing in the tlam synth rule does not capture" "true"
+    (string_of_term
+       (eval (fst (parse "(/\\'a. \\y:'a. (/\\'a. y) [nat]) [bool] true"))));
+  check "e2e: shadowed type variables stay distinct" "true"
+    (string_of_term
+       (eval
+          (fst (parse "(/\\'a. \\y:'a. /\\'a. \\z:'a. z) [nat] 5 [bool] true"))))
 
 (* file reading and execution *)
 

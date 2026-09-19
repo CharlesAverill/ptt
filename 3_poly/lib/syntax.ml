@@ -199,3 +199,38 @@ let rec tcas (t : typ) (s : string) (t' : typ) : typ =
       else
         let v' = fresh v ((s :: tfree t') @ tfree x) in
         TForall (v', tcas (tcas x v (TVar v')) s t')
+
+(** Every type variable name mentioned in [t] *)
+let rec tnames (t : typ) : string list =
+  match t with
+  | TVar x -> [ x ]
+  | TUnit | TBool | TNat -> []
+  | TForall (v, x) -> v :: tnames x
+  | TArrow (t1, t2) -> tnames t1 @ tnames t2
+
+(** Every type variable name mentioned in the type annotations of [e] *)
+let rec stnames (e : sterm) : string list =
+  let opt = function Some t -> tnames t | None -> [] in
+  match e with
+  | SVar _ | SUnit | STrue | SFalse | SNat _ -> []
+  | SIfthenelse (x1, x2, x3) -> stnames x1 @ stnames x2 @ stnames x3
+  | SIseq (x1, x2) | SApp (x1, x2) -> stnames x1 @ stnames x2
+  | SLam (_, ty, x) -> opt ty @ stnames x
+  | SAnn (x, ty) -> stnames x @ tnames ty
+  | STLam (a, x) -> a :: stnames x
+  | SPolyApp (x, ty) -> stnames x @ opt ty
+
+(** Rename the free type variable [a] to [b] in the type annotations of [e] *)
+let rec strename (e : sterm) (a : string) (b : string) : sterm =
+  let r x = strename x a b in
+  let rt t = tcas t a (TVar b) in
+  match e with
+  | SVar _ | SUnit | STrue | SFalse | SNat _ -> e
+  | SIfthenelse (x1, x2, x3) -> SIfthenelse (r x1, r x2, r x3)
+  | SIseq (x1, x2) -> SIseq (r x1, r x2)
+  | SApp (x1, x2) -> SApp (r x1, r x2)
+  | SLam (v, ty, x) -> SLam (v, Option.map rt ty, r x)
+  | SAnn (x, ty) -> SAnn (r x, rt ty)
+  | STLam (c, _) when c = a -> e
+  | STLam (c, x) -> STLam (c, r x)
+  | SPolyApp (x, ty) -> SPolyApp (r x, Option.map rt ty)

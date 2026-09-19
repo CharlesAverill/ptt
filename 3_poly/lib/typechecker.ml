@@ -18,28 +18,14 @@ let empty_typctx = { terms = (fun _ -> None); tyvars = [] }
 let update_term (f : typctx) x y =
   { terms = (fun x' -> if x = x' then y else f.terms x'); tyvars = f.tyvars }
 
-let remove_first (l : 'a list) (x : 'a) : 'a list =
-  List.rev
-    (snd
-       (List.fold_left
-          (fun (seen, l') i ->
-            if seen then (true, i :: l')
-            else if i = x then (true, l')
-            else (false, i :: l'))
-          (false, []) l))
-
-let update_tyvar (f : typctx) x y =
-  {
-    terms = f.terms;
-    tyvars = (if y then x :: f.tyvars else remove_first f.tyvars x);
-  }
+let update_tyvar (f : typctx) x = { terms = f.terms; tyvars = x :: f.tyvars }
 
 let rec type_wf (gamma : typctx) (t : typ) : bool =
   match t with
   | TUnit | TBool | TNat -> true
   | TVar v -> List.mem v gamma.tyvars
   | TArrow (t1, t2) -> type_wf gamma t1 && type_wf gamma t2
-  | TForall (alpha, t') -> type_wf (update_tyvar gamma alpha true) t'
+  | TForall (alpha, t') -> type_wf (update_tyvar gamma alpha) t'
 
 let rec types_eq (t1 : typ) (t2 : typ) : bool =
   match (t1, t2) with
@@ -52,10 +38,22 @@ let rec types_eq (t1 : typ) (t2 : typ) : bool =
       types_eq (tcas x a (TVar gamma)) (tcas y b (TVar gamma))
   | _, _ -> false
 
+(** Bring the type variable of [/\\alpha. e] into scope *)
+let bind_tyvar (gamma : typctx) (alpha : string) (e : sterm) : string * sterm =
+  if not (List.mem alpha gamma.tyvars) then (alpha, e)
+  else
+    let alpha' = fresh alpha (gamma.tyvars @ stnames e) in
+    (alpha', strename e alpha alpha')
+
 (** Synthesize the type of a [sterm] under context [gamma], producing both its
     [typ] and its type-erased [term] on success. *)
 let rec synth (gamma : typctx) (t : sterm) : (typed_term, string) result =
   match t with
+  (* Literals *)
+  | SUnit -> return (Unit, TUnit)
+  | STrue -> return (True, TBool)
+  | SFalse -> return (False, TBool)
+  | SNat n -> return (Nat n, TNat)
   (* Var: G v = T => G |- v => T *)
   | SVar v -> (
       match gamma.terms v with
@@ -91,7 +89,8 @@ let rec synth (gamma : typctx) (t : sterm) : (typed_term, string) result =
       return (Iseq (x', y'), TBool)
   (*G['a := true] |- e' => b => /\'a.e => forall 'a. b*)
   | STLam (alpha, e) ->
-      let* e', b = synth (update_tyvar gamma alpha true) e in
+      let alpha, e = bind_tyvar gamma alpha e in
+      let* e', b = synth (update_tyvar gamma alpha) e in
       return (e', TForall (alpha, b))
   (* G |- e => forall 'a.'b => G |- 'k type => G |- e['k] => 'b['a := 'k] *)
   | SPolyApp (e, Some kappa) -> (
@@ -115,11 +114,6 @@ let rec synth (gamma : typctx) (t : sterm) : (typed_term, string) result =
     type-erased version if so *)
 and check (gamma : typctx) (t : sterm) (ty : typ) : (term, string) result =
   match (t, ty) with
-  (* primitive types *)
-  | SUnit, TUnit -> return Unit
-  | STrue, TBool -> return True
-  | SFalse, TBool -> return False
-  | SNat n, TNat -> return (Nat n)
   (* ->|: G[x := a1] |- e <= a2 => G |- \x.e <= a1 -> a2 *)
   | SLam (x, None, e), TArrow (a1, a2) ->
       let* e' = check (update_term gamma x (Some a1)) e a2 in
@@ -132,8 +126,10 @@ and check (gamma : typctx) (t : sterm) (ty : typ) : (term, string) result =
       return (Ifthenelse (b', c1', c2'))
       (* G['a := true] |- e <= B => G |- /\'a.e <= forall 'a. B *)
   | STLam (alpha, e), TForall (alpha', b) ->
-      let b' = if alpha = alpha' then b else tcas b alpha' (TVar alpha) in
-      let* e' = check (update_tyvar gamma alpha true) e b' in
+      let alpha, e = bind_tyvar gamma alpha e in
+      let* e' =
+        check (update_tyvar gamma alpha) e (tcas b alpha' (TVar alpha))
+      in
       return e'
   (* Sub: G |- e => A => A = B => G |- e <= B *)
   | e, b ->
@@ -142,7 +138,7 @@ and check (gamma : typctx) (t : sterm) (ty : typ) : (term, string) result =
       else
         fail
           (Printf.sprintf "type mismatch: expected %s but got %s"
-             (string_of_typ a) (string_of_typ b))
+             (string_of_typ b) (string_of_typ a))
 
 (** Typecheck an [sterm] and produce a type-erased [term] and its [typ] *)
 let typecheck = synth
